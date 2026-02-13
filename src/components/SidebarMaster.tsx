@@ -19,14 +19,15 @@ export default function SidebarMaster() {
       height: "100vh"
     }}>
       <div style={{ 
-        height: 80, 
+        height: 64, // Ajustado para 64px para alinhar com o header
         background: "white", 
         display: "flex", 
         alignItems: "center", 
         justifyContent: "center",
-        borderBottom: "1px solid rgba(0,0,0,0.1)"
+        borderBottom: "1px solid rgba(0,0,0,0.1)",
+        padding: 0 // Remove padding extra se houver
       }}>
-        <img src="/logo/logo_oficial.png" alt="Sindflow Master" style={{ width: 200, height: 64, objectFit: "contain" }} />
+        <img src="/logo/logo_oficial.png" alt="Sindflow Master" style={{ maxHeight: "80%", maxWidth: "90%", objectFit: "contain" }} />
       </div>
       
       <nav style={{ display: "grid", gap: 8, padding: 16 }}>

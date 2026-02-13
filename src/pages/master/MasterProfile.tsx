@@ -43,18 +43,26 @@ export default function MasterProfile() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("Usuário não autenticado");
 
+      // Buscar role atual para não sobrescrever com null
+      const { data: currentProfile } = await supabase
+        .from("profiles")
+        .select("role")
+        .eq("id", user.id)
+        .single();
+
       const updates = {
         id: user.id,
         display_name: displayName,
         photo_url: avatarUrl,
+        role: currentProfile?.role || 'master' // Garante que a role não seja nula
       };
 
       const { error } = await supabase.from("profiles").upsert(updates);
       if (error) throw error;
 
       setMessage("Perfil atualizado com sucesso!");
-    } catch (error) {
-      setMessage("Erro ao atualizar perfil.");
+    } catch (error: any) {
+      setMessage("Erro ao atualizar perfil: " + error.message);
       console.error(error);
     } finally {
       setLoading(false);
