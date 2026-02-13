@@ -2,9 +2,32 @@ import { Link, Outlet, useNavigate } from "react-router-dom";
 import { LogOut, User } from "lucide-react";
 import SidebarMaster from "../components/SidebarMaster";
 import { supabase } from "../lib/supabase";
+import { useEffect, useState } from "react";
 
 export default function MasterShell() {
   const nav = useNavigate();
+  const [avatarUrl, setAvatarUrl] = useState("");
+  const [displayName, setDisplayName] = useState("Master Admin");
+
+  useEffect(() => {
+    getProfile();
+  }, []);
+
+  async function getProfile() {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) {
+      const { data } = await supabase
+        .from("profiles")
+        .select("photo_url, display_name")
+        .eq("id", user.id)
+        .single();
+      
+      if (data) {
+        if (data.photo_url) setAvatarUrl(data.photo_url);
+        if (data.display_name) setDisplayName(data.display_name);
+      }
+    }
+  }
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -26,10 +49,24 @@ export default function MasterShell() {
           <h2 style={{ fontSize: 18, margin: 0, fontWeight: 500 }}>Administração do Sistema</h2>
           <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 16 }}>
             <Link to="/master/perfil" style={{ display: "flex", alignItems: "center", gap: 8, textDecoration: "none", color: "white" }}>
-              <div style={{ width: 36, height: 36, borderRadius: "50%", background: "rgba(255,255,255,0.2)", color: "white", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                <User size={18} />
+              <div style={{ 
+                width: 36, 
+                height: 36, 
+                borderRadius: "50%", 
+                background: "rgba(255,255,255,0.2)", 
+                color: "white", 
+                display: "flex", 
+                alignItems: "center", 
+                justifyContent: "center",
+                overflow: "hidden"
+              }}>
+                {avatarUrl ? (
+                  <img src={avatarUrl} alt="Avatar" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                ) : (
+                  <User size={18} />
+                )}
               </div>
-              <span style={{ fontSize: 14, fontWeight: 500 }}>Master Admin</span>
+              <span style={{ fontSize: 14, fontWeight: 500 }}>{displayName}</span>
             </Link>
             <button 
               onClick={handleLogout}
