@@ -19,9 +19,8 @@ export default function SidebarMaster() {
       padding: 16,
       height: "100vh"
     }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 24 }}>
-        <img src="/logo/logo_oficial.png" alt="Sindflow Master" style={{ height: 32, borderRadius: 6 }} />
-        <strong>Painel Master</strong>
+      <div style={{ display: "flex", justifyContent: "center", marginBottom: 32, padding: "16px 0" }}>
+        <img src="/logo/logo_oficial.png" alt="Sindflow Master" style={{ height: 64, objectFit: "contain" }} />
       </div>
       <nav style={{ display: "grid", gap: 8 }}>
         {items.map(i => (

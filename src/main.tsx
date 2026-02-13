@@ -25,6 +25,8 @@ import MasterClients from "./pages/master/MasterClients";
 import MasterUsage from "./pages/master/MasterUsage";
 import MasterPayments from "./pages/master/MasterPayments";
 
+import MasterProfile from "./pages/master/MasterProfile";
+
 const root = createRoot(document.getElementById("root")!);
 
 root.render(
@@ -64,10 +66,11 @@ root.render(
           }
         >
            <Route path="dashboard" element={<MasterDashboard />} />
-           <Route path="apis" element={<MasterApis />} />
            <Route path="clientes" element={<MasterClients />} />
            <Route path="uso" element={<MasterUsage />} />
            <Route path="pagamentos" element={<MasterPayments />} />
+           <Route path="apis" element={<MasterApis />} />
+           <Route path="perfil" element={<MasterProfile />} />
            <Route index element={<Navigate to="dashboard" replace />} />
         </Route>
         
