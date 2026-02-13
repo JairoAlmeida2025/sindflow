@@ -1,5 +1,5 @@
 import { useState } from "react";
-import MetricsBar from "../../components/MetricsBar";
+// Removido MetricsBar e cards para focar em Inbox estilo WhatsApp
 
 type Conversation = {
   id: string;
@@ -21,7 +21,6 @@ export default function Conversations() {
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1fr 360px", gap: 16 }}>
       <div>
-        <MetricsBar />
         <div className="card" style={{ marginTop: 16 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
             <strong>Chat com Moradores</strong>
@@ -89,24 +88,7 @@ export default function Conversations() {
           </div>
         </div>
       </div>
-      <div style={{ display: "grid", gap: 16 }}>
-        <div className="card">
-          <strong>Configuração do Agente IA</strong>
-          <div style={{ marginTop: 8, fontSize: 14, opacity: 0.8 }}>Prompt Base da IA</div>
-          <textarea rows={6} defaultValue={"Você é o assistente virtual do condomínio. Responda educadamente e registre ocorrências."} style={{ width: "100%", marginTop: 8 }} />
-          <div style={{ marginTop: 8, fontSize: 14, opacity: 0.8 }}>API Key da OpenAI</div>
-          <input defaultValue={"sk-1234************5678"} />
-          <button className="btn-primary" style={{ marginTop: 12 }}>Salvar Configurações</button>
-        </div>
-        <div className="card">
-          <strong>Solicitações Recentes</strong>
-          <ul style={{ display: "grid", gap: 8, marginTop: 8 }}>
-            <li>Lucas Souza: Vacamento na garagem — Há 5 min</li>
-            <li>Mariana Lima: Reclamação de barulho — Há 12 min</li>
-            <li>Carlos Mendes: Consulta de boletos — Há 20 min</li>
-          </ul>
-        </div>
-      </div>
+      <div />
     </div>
   );
 }

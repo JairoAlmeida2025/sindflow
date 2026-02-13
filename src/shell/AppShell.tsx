@@ -11,17 +11,17 @@ export default function AppShell() {
     <div style={{ display: "grid", gridTemplateColumns: "260px 1fr", height: "100vh" }}>
       <Sidebar />
       <div style={{ display: "grid", gridTemplateRows: "64px 1fr" }}>
-        <header className="header" style={{ display: "flex", alignItems: "center", padding: "0 16px", borderBottom: "1px solid rgba(255,255,255,0.2)", position: "relative" }}>
+        <header className="header" style={{ display: "flex", alignItems: "center", padding: "0 16px", background: "#3A1C71", color: "white", position: "relative" }}>
           <nav className="nav" style={{ display: "flex", gap: 12 }}>
-            <Link to="/app/conversas">Dashboard</Link>
-            <Link to="/app/kanban">Solicitações</Link>
-            <Link to="/app/agente">Agente IA</Link>
+            <Link to="/app/conversas" style={{ color: "white" }}>Conversas</Link>
+            <Link to="/app/kanban" style={{ color: "white" }}>Solicitações</Link>
+            <Link to="/app/agente" style={{ color: "white" }}>Agente IA</Link>
           </nav>
           <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 12 }}>
-            <span>Agente:</span>
-            <span className="indicator-agente">Ativo</span>
+            <span style={{ color: "white" }}>Agente:</span>
+            <span className="indicator-agente" style={{ background: "rgba(255,255,255,0.2)", color: "white" }}>Ativo</span>
             <button onClick={() => setMenuOpen(!menuOpen)} style={{ all: "unset", cursor: "pointer" }}>
-              <img src="/images/landingpage/landingpage_001.png" alt="avatar" style={{ width: 32, height: 32, borderRadius: "50%" }} />
+              <img src="/logo/favico_90x90.png" alt="avatar" style={{ width: 32, height: 32, borderRadius: "50%" }} />
             </button>
           </div>
           {menuOpen && (

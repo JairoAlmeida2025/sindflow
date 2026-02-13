@@ -1,7 +1,7 @@
 import { NavLink } from "react-router-dom";
 
 const items = [
-  { to: "/app/conversas", label: "Dashboard" },
+  { to: "/app/conversas", label: "Conversas" },
   { to: "/app/whatsapp", label: "Conexão WhatsApp" },
   { to: "/app/agente", label: "Agente IA" },
   { to: "/app/kanban", label: "Solicitações" },
@@ -18,13 +18,19 @@ export default function Sidebar() {
       color: "#fff",
       display: "flex",
       flexDirection: "column",
-      padding: 16
+      height: "100vh"
     }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 24 }}>
-        <img src="/logo/logo_oficial.png" alt="Sindflow" style={{ height: 32, borderRadius: 6 }} />
-        <strong>Dashboard</strong>
+      <div style={{
+        height: 64,
+        background: "white",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        borderBottom: "1px solid rgba(0,0,0,0.1)"
+      }}>
+        <img src="/logo/logo_oficial.png" alt="Sindflow" style={{ maxHeight: "80%", maxWidth: "90%", objectFit: "contain" }} />
       </div>
-      <nav style={{ display: "grid", gap: 8 }}>
+      <nav style={{ display: "grid", gap: 8, padding: 16 }}>
         {items.map(i => (
           <NavLink
             key={i.to}
