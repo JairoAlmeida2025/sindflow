@@ -26,11 +26,15 @@ import MasterUsage from "./pages/master/MasterUsage";
 import MasterPayments from "./pages/master/MasterPayments";
 
 import MasterProfile from "./pages/master/MasterProfile";
+import EnvWarning from "./components/EnvWarning";
+import MasterConversations from "./pages/master/MasterConversations";
+import MasterWhatsapp from "./pages/master/MasterWhatsapp";
 
 const root = createRoot(document.getElementById("root")!);
 
 root.render(
   <React.StrictMode>
+    <EnvWarning />
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<Landing />} />
@@ -65,13 +69,14 @@ root.render(
             </ProtectedRouteMaster>
           }
         >
-           <Route path="dashboard" element={<MasterDashboard />} />
+           <Route path="conversas" element={<MasterConversations />} />
            <Route path="clientes" element={<MasterClients />} />
            <Route path="uso" element={<MasterUsage />} />
            <Route path="pagamentos" element={<MasterPayments />} />
            <Route path="apis" element={<MasterApis />} />
            <Route path="perfil" element={<MasterProfile />} />
-           <Route index element={<Navigate to="dashboard" replace />} />
+           <Route path="whatsapp" element={<MasterWhatsapp />} />
+           <Route index element={<Navigate to="conversas" replace />} />
         </Route>
         
         <Route path="/master/login" element={<Login />} /> 

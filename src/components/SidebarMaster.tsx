@@ -1,10 +1,9 @@
 import { NavLink } from "react-router-dom";
 
 const items = [
-  { to: "/master/dashboard", label: "Dashboard" },
+  { to: "/master/conversas", label: "Conversas" },
+  { to: "/master/whatsapp", label: "Conexão WhatsApp" },
   { to: "/master/clientes", label: "Clientes" },
-  { to: "/master/uso", label: "Uso I.A." },
-  { to: "/master/pagamentos", label: "Pagamentos" },
   { to: "/master/apis", label: "Configurar APIs" },
 ];
 
