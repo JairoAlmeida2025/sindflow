@@ -13,7 +13,8 @@ export default function Login() {
       setError("");
       const { data, error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) {
-        setError("E-mail ou senha inválidos");
+        console.error("Erro no login:", error);
+        setError(error.message); // Mostra o erro real do Supabase
         return;
       }
       nav("/app/conversas");

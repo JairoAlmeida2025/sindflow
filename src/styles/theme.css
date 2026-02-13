@@ -6,6 +6,55 @@
   --preto-carbono: #1F1F1F;
 }
 
+/* Landing Page Styles */
+.landing-hero {
+  background: linear-gradient(180deg, var(--cinza-nevoa) 0%, #fff 100%);
+  padding: 80px 24px;
+  text-align: center;
+}
+.landing-h1 {
+  font-size: 3rem;
+  font-weight: 800;
+  color: var(--preto-carbono);
+  margin-bottom: 16px;
+  line-height: 1.2;
+}
+.landing-subtitle {
+  font-size: 1.25rem;
+  color: #666;
+  max-width: 600px;
+  margin: 0 auto 40px;
+  line-height: 1.6;
+}
+.benefit-card {
+  background: white;
+  border-radius: 16px;
+  padding: 32px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.05);
+  transition: transform 0.2s;
+}
+.benefit-card:hover {
+  transform: translateY(-5px);
+}
+.step-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+.step-number {
+  background: var(--roxo-fluxo);
+  color: white;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  flex-shrink: 0;
+}
+
 html, body, #root {
   height: 100%;
 }
