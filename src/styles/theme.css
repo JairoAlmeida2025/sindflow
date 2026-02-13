@@ -1,0 +1,59 @@
+:root {
+  --roxo-profundo: #3A1C71;
+  --roxo-fluxo: #6A4BCB;
+  --amarelo-inteligente: #F4C430;
+  --cinza-nevoa: #F7F7FB;
+  --preto-carbono: #1F1F1F;
+}
+
+html, body, #root {
+  height: 100%;
+}
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial;
+  color: var(--preto-carbono);
+  background: var(--cinza-nevoa);
+}
+
+.header {
+  background: var(--roxo-profundo);
+  color: white;
+}
+.nav a {
+  color: white;
+}
+.indicator-agente {
+  background: var(--roxo-fluxo);
+  color: white;
+  border-radius: 8px;
+  padding: 6px 10px;
+}
+.btn-primary {
+  background: var(--amarelo-inteligente);
+  color: var(--preto-carbono);
+  border: none;
+  border-radius: 8px;
+  padding: 10px 16px;
+  cursor: pointer;
+}
+.btn-secondary {
+  background: var(--roxo-fluxo);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  padding: 10px 16px;
+  cursor: pointer;
+}
+.card {
+  background: white;
+  border: 1px solid #eee;
+  border-radius: 8px;
+  padding: 12px;
+}
+.chip {
+  background: #eef2ff;
+  color: var(--preto-carbono);
+  border-radius: 6px;
+  padding: 2px 6px;
+}
