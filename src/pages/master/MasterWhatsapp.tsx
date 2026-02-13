@@ -10,7 +10,7 @@ export default function MasterWhatsapp() {
   async function connect() {
     setLoading(true);
     try {
-      const { data, error } = await supabase.functions.invoke("evo-proxy", {
+      const { data, error } = await supabase.functions.invoke("smart-worker", {
         body: { action: "create" }
       });
       if (error) throw error;
@@ -25,7 +25,7 @@ export default function MasterWhatsapp() {
   async function getQr() {
     setLoading(true);
     try {
-      const { data, error } = await supabase.functions.invoke("evo-proxy", {
+      const { data, error } = await supabase.functions.invoke("smart-worker", {
         body: { action: "qrcode" }
       });
       if (error) throw error;
@@ -42,7 +42,7 @@ export default function MasterWhatsapp() {
   useEffect(() => {
     const id = setInterval(async () => {
       try {
-        const { data } = await supabase.functions.invoke("evo-proxy", {
+        const { data } = await supabase.functions.invoke("smart-worker", {
           body: { action: "status" }
         });
         const payload = data?.data || data;
@@ -57,7 +57,7 @@ export default function MasterWhatsapp() {
   async function disconnect() {
     setLoading(true);
     try {
-      await supabase.functions.invoke("evo-proxy", { body: { action: "logout" } });
+      await supabase.functions.invoke("smart-worker", { body: { action: "logout" } });
       setConnected(false);
       setQrBase64(null);
       setStatus("disconnected");

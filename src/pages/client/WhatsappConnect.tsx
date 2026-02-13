@@ -10,7 +10,7 @@ export default function WhatsappConnect() {
   async function connect() {
     setLoading(true);
     try {
-      await supabase.functions.invoke("evo-proxy", { body: { action: "create" } });
+      await supabase.functions.invoke("smart-worker", { body: { action: "create" } });
       await getQr();
     } finally {
       setLoading(false);
@@ -20,7 +20,7 @@ export default function WhatsappConnect() {
   async function getQr() {
     setLoading(true);
     try {
-      const { data } = await supabase.functions.invoke("evo-proxy", { body: { action: "qrcode" } });
+      const { data } = await supabase.functions.invoke("smart-worker", { body: { action: "qrcode" } });
       const payload = data?.data || data;
       setQrBase64(payload?.qr || payload?.qrcode || null);
     } finally {
@@ -31,7 +31,7 @@ export default function WhatsappConnect() {
   async function disconnect() {
     setLoading(true);
     try {
-      await supabase.functions.invoke("evo-proxy", { body: { action: "logout" } });
+      await supabase.functions.invoke("smart-worker", { body: { action: "logout" } });
       setStatus("desconectado");
       setQrBase64(null);
       setNumber(null);
@@ -42,7 +42,7 @@ export default function WhatsappConnect() {
 
   useEffect(() => {
     const id = setInterval(async () => {
-      const { data } = await supabase.functions.invoke("evo-proxy", { body: { action: "status" } });
+      const { data } = await supabase.functions.invoke("smart-worker", { body: { action: "status" } });
       const payload = data?.data || data;
       const s = payload?.status || "desconectado";
       setStatus(s.toLowerCase().includes("connect") ? "conectado" : "desconectado");
