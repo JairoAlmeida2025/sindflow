@@ -4,6 +4,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import "./styles/theme.css";
 import AppShell from "./shell/AppShell";
 import ProtectedRoute from "./components/ProtectedRoute";
+import ProtectedRouteMaster from "./components/ProtectedRouteMaster";
 import Landing from "./pages/public/Landing";
 import Payment from "./pages/public/Payment";
 import EnvNav from "./pages/public/EnvNav";
@@ -51,14 +52,31 @@ root.render(
           <Route path="whatsapp" element={<WhatsappConnect />} />
           <Route index element={<Navigate to="conversas" replace />} />
         </Route>
-        <Route path="/master">
-          <Route path="login" element={<MasterLogin />} />
-          <Route index element={<MasterDashboard />} />
-          <Route path="apis" element={<MasterApis />} />
-          <Route path="clientes" element={<MasterClients />} />
-          <Route path="uso" element={<MasterUsage />} />
-          <Route path="pagamentos" element={<MasterPayments />} />
+        
+        {/* Rotas Master Protegidas */}
+        <Route
+          path="/master"
+          element={
+            <ProtectedRouteMaster>
+              <div style={{ padding: 24 }}>
+                <h1>Painel Master</h1>
+                {/* Aqui poderia ter um MasterShell similar ao AppShell */}
+                <Routes>
+                   <Route path="dashboard" element={<MasterDashboard />} />
+                   <Route path="apis" element={<MasterApis />} />
+                   <Route path="clientes" element={<MasterClients />} />
+                   <Route path="uso" element={<MasterUsage />} />
+                   <Route path="pagamentos" element={<MasterPayments />} />
+                   <Route index element={<Navigate to="dashboard" replace />} />
+                </Routes>
+              </div>
+            </ProtectedRouteMaster>
+          }
+        >
+          {/* Sub-rotas definidas acima dentro do element para simplificar ou usar Outlet se criar MasterShell */}
         </Route>
+        {/* Rota de login master separada se quiser, mas o login único já redireciona */}
+        <Route path="/master/login" element={<Login />} /> 
       </Routes>
     </BrowserRouter>
   </React.StrictMode>

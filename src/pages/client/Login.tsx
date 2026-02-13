@@ -14,10 +14,24 @@ export default function Login() {
       const { data, error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) {
         console.error("Erro no login:", error);
-        setError(error.message); // Mostra o erro real do Supabase
+        setError(error.message);
         return;
       }
-      nav("/app/conversas");
+      
+      // Consultar role no profile
+      if (data.user) {
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("role")
+          .eq("id", data.user.id)
+          .single();
+        
+        if (profile?.role === "master") {
+          nav("/master/dashboard");
+        } else {
+          nav("/app/conversas");
+        }
+      }
     })();
   };
   return (
