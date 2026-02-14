@@ -6,11 +6,15 @@ export default function WhatsappConnect() {
   const [number, setNumber] = useState<string | null>(null);
   const [qrBase64, setQrBase64] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [instanceName, setInstanceName] = useState<string>("");
 
   async function connect() {
     setLoading(true);
     try {
-      await supabase.functions.invoke("smart-worker", { body: { action: "create" } });
+      const { data: { user } } = await supabase.auth.getUser();
+      const name = user ? `usr-${user.id}` : "evolution_exchange";
+      setInstanceName(name);
+      await supabase.functions.invoke("smart-worker", { body: { action: "create-instance", instanceName: name } });
       await getQr();
     } finally {
       setLoading(false);
@@ -20,9 +24,10 @@ export default function WhatsappConnect() {
   async function getQr() {
     setLoading(true);
     try {
-      const { data } = await supabase.functions.invoke("smart-worker", { body: { action: "qrcode" } });
+      const name = instanceName || `usr-${(await supabase.auth.getUser()).data.user?.id}`;
+      const { data } = await supabase.functions.invoke("smart-worker", { body: { action: "get-qrcode", instanceName: name } });
       const payload = data?.data || data;
-      setQrBase64(payload?.qr || payload?.qrcode || null);
+      setQrBase64(payload?.qr || payload?.qrcode || payload?.base64 || null);
     } finally {
       setLoading(false);
     }
@@ -31,7 +36,8 @@ export default function WhatsappConnect() {
   async function disconnect() {
     setLoading(true);
     try {
-      await supabase.functions.invoke("smart-worker", { body: { action: "logout" } });
+      const name = instanceName || `usr-${(await supabase.auth.getUser()).data.user?.id}`;
+      await supabase.functions.invoke("smart-worker", { body: { action: "logout", instanceName: name } });
       setStatus("desconectado");
       setQrBase64(null);
       setNumber(null);
@@ -42,9 +48,10 @@ export default function WhatsappConnect() {
 
   useEffect(() => {
     const id = setInterval(async () => {
-      const { data } = await supabase.functions.invoke("smart-worker", { body: { action: "status" } });
+      const name = instanceName || `usr-${(await supabase.auth.getUser()).data.user?.id}`;
+      const { data } = await supabase.functions.invoke("smart-worker", { body: { action: "get-status", instanceName: name } });
       const payload = data?.data || data;
-      const s = payload?.status || "desconectado";
+      const s = payload?.status || payload?.instance?.state || "desconectado";
       setStatus(s.toLowerCase().includes("connect") ? "conectado" : "desconectado");
     }, 5000);
     return () => clearInterval(id);

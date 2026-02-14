@@ -6,12 +6,16 @@ export default function MasterWhatsapp() {
   const [qrBase64, setQrBase64] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [connected, setConnected] = useState(false);
+  const [instanceName, setInstanceName] = useState<string>("");
 
   async function connect() {
     setLoading(true);
     try {
+      const { data: { user } } = await supabase.auth.getUser();
+      const name = user ? `usr-${user.id}` : "evolution_exchange";
+      setInstanceName(name);
       const { data, error } = await supabase.functions.invoke("smart-worker", {
-        body: { action: "create" }
+        body: { action: "create-instance", instanceName: name }
       });
       if (error) throw error;
       await getQr();
@@ -25,8 +29,9 @@ export default function MasterWhatsapp() {
   async function getQr() {
     setLoading(true);
     try {
+      const name = instanceName || `usr-${(await supabase.auth.getUser()).data.user?.id}`;
       const { data, error } = await supabase.functions.invoke("smart-worker", {
-        body: { action: "qrcode" }
+        body: { action: "get-qrcode", instanceName: name }
       });
       if (error) throw error;
       const payload = data?.data || data;
@@ -42,8 +47,9 @@ export default function MasterWhatsapp() {
   useEffect(() => {
     const id = setInterval(async () => {
       try {
+        const name = instanceName || `usr-${(await supabase.auth.getUser()).data.user?.id}`;
         const { data } = await supabase.functions.invoke("smart-worker", {
-          body: { action: "status" }
+          body: { action: "get-status", instanceName: name }
         });
         const payload = data?.data || data;
         const s = payload?.status || payload?.state || "disconnected";
@@ -57,7 +63,8 @@ export default function MasterWhatsapp() {
   async function disconnect() {
     setLoading(true);
     try {
-      await supabase.functions.invoke("smart-worker", { body: { action: "logout" } });
+      const name = instanceName || `usr-${(await supabase.auth.getUser()).data.user?.id}`;
+      await supabase.functions.invoke("smart-worker", { body: { action: "logout", instanceName: name } });
       setConnected(false);
       setQrBase64(null);
       setStatus("disconnected");
