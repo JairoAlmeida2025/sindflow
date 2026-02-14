@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../../lib/supabase";
+import { WHATSAPP_API_URL } from "../../lib/config";
 
 export default function MasterWhatsapp() {
   const [loading, setLoading] = useState(false);
@@ -14,10 +15,11 @@ export default function MasterWhatsapp() {
       const { data: { user } } = await supabase.auth.getUser();
       const name = user ? `usr-${user.id}` : "evolution_exchange";
       setInstanceName(name);
-      const { data, error } = await supabase.functions.invoke("smart-worker", {
-        body: { action: "create-instance", instanceName: name }
+      await fetch(`${WHATSAPP_API_URL}/whatsapp/connect`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tenantId: name })
       });
-      if (error) throw error;
       await getQr();
     } catch (e) {
       console.error(e);
@@ -30,13 +32,10 @@ export default function MasterWhatsapp() {
     setLoading(true);
     try {
       const name = instanceName || `usr-${(await supabase.auth.getUser()).data.user?.id}`;
-      const { data, error } = await supabase.functions.invoke("smart-worker", {
-        body: { action: "get-qrcode", instanceName: name }
-      });
-      if (error) throw error;
-      const payload = data?.data || data;
-      setQrBase64(payload?.qr || payload?.qrcode || null);
-      setStatus(payload?.status || null);
+      const res = await fetch(`${WHATSAPP_API_URL}/whatsapp/qrcode?tenantId=${encodeURIComponent(name)}`);
+      const json = await res.json();
+      setQrBase64(json.qr || null);
+      setStatus(json.status || null);
     } catch (e) {
       console.error(e);
     } finally {
@@ -48,11 +47,9 @@ export default function MasterWhatsapp() {
     const id = setInterval(async () => {
       try {
         const name = instanceName || `usr-${(await supabase.auth.getUser()).data.user?.id}`;
-        const { data } = await supabase.functions.invoke("smart-worker", {
-          body: { action: "get-status", instanceName: name }
-        });
-        const payload = data?.data || data;
-        const s = payload?.status || payload?.state || "disconnected";
+        const res = await fetch(`${WHATSAPP_API_URL}/whatsapp/status?tenantId=${encodeURIComponent(name)}`);
+        const json = await res.json();
+        const s = json.status || "disconnected";
         setStatus(s);
         setConnected(s === "connected" || s === "CONNECTED");
       } catch {}
@@ -64,7 +61,11 @@ export default function MasterWhatsapp() {
     setLoading(true);
     try {
       const name = instanceName || `usr-${(await supabase.auth.getUser()).data.user?.id}`;
-      await supabase.functions.invoke("smart-worker", { body: { action: "logout", instanceName: name } });
+      await fetch(`${WHATSAPP_API_URL}/whatsapp/logout`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tenantId: name })
+      });
       setConnected(false);
       setQrBase64(null);
       setStatus("disconnected");

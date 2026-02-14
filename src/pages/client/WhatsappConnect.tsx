@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../../lib/supabase";
+import { WHATSAPP_API_URL } from "../../lib/config";
 
 export default function WhatsappConnect() {
   const [status, setStatus] = useState<"conectado" | "desconectado" | "reconectando">("desconectado");
@@ -12,9 +13,13 @@ export default function WhatsappConnect() {
     setLoading(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      const name = user ? `usr-${user.id}` : "evolution_exchange";
+      const name = user ? `usr-${user.id}` : "default";
       setInstanceName(name);
-      await supabase.functions.invoke("smart-worker", { body: { action: "create-instance", instanceName: name } });
+      await fetch(`${WHATSAPP_API_URL}/whatsapp/connect`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tenantId: name })
+      });
       await getQr();
     } finally {
       setLoading(false);
@@ -25,9 +30,10 @@ export default function WhatsappConnect() {
     setLoading(true);
     try {
       const name = instanceName || `usr-${(await supabase.auth.getUser()).data.user?.id}`;
-      const { data } = await supabase.functions.invoke("smart-worker", { body: { action: "get-qrcode", instanceName: name } });
-      const payload = data?.data || data;
-      setQrBase64(payload?.qr || payload?.qrcode || payload?.base64 || null);
+      const res = await fetch(`${WHATSAPP_API_URL}/whatsapp/qrcode?tenantId=${encodeURIComponent(name)}`);
+      const json = await res.json();
+      setQrBase64(json.qr || null);
+      setStatus(json.status === "connected" ? "conectado" : json.status === "qr_required" ? "reconectando" : "desconectado");
     } finally {
       setLoading(false);
     }
@@ -37,7 +43,11 @@ export default function WhatsappConnect() {
     setLoading(true);
     try {
       const name = instanceName || `usr-${(await supabase.auth.getUser()).data.user?.id}`;
-      await supabase.functions.invoke("smart-worker", { body: { action: "logout", instanceName: name } });
+      await fetch(`${WHATSAPP_API_URL}/whatsapp/logout`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tenantId: name })
+      });
       setStatus("desconectado");
       setQrBase64(null);
       setNumber(null);
@@ -49,10 +59,10 @@ export default function WhatsappConnect() {
   useEffect(() => {
     const id = setInterval(async () => {
       const name = instanceName || `usr-${(await supabase.auth.getUser()).data.user?.id}`;
-      const { data } = await supabase.functions.invoke("smart-worker", { body: { action: "get-status", instanceName: name } });
-      const payload = data?.data || data;
-      const s = payload?.status || payload?.instance?.state || "desconectado";
-      setStatus(s.toLowerCase().includes("connect") ? "conectado" : "desconectado");
+      const res = await fetch(`${WHATSAPP_API_URL}/whatsapp/status?tenantId=${encodeURIComponent(name)}`);
+      const json = await res.json();
+      const s = json.status || "desconectado";
+      setStatus(s === "connected" ? "conectado" : s === "qr_required" ? "reconectando" : "desconectado");
     }, 5000);
     return () => clearInterval(id);
   }, []);
