@@ -1,4 +1,9 @@
-import makeWASocket, { useMultiFileAuthState, fetchLatestBaileysVersion } from "@whiskeysockets/baileys";
+import makeWASocket, {
+  useMultiFileAuthState,
+  fetchLatestBaileysVersion,
+  makeCacheableSignalKeyStore,
+  DisconnectReason
+} from "@whiskeysockets/baileys";
 import Pino from "pino";
 import QRCode from "qrcode";
 import fs from "fs";
@@ -19,17 +24,21 @@ export async function createOrGetInstance(tenantId, wsNotify) {
   if (!fs.existsSync(tenantDir)) fs.mkdirSync(tenantDir, { recursive: true });
   const { state, saveCreds } = await useMultiFileAuthState(tenantDir);
   const { version } = await fetchLatestBaileysVersion();
+  const logger = Pino({ level: "silent" });
   const sock = makeWASocket({
     version,
     printQRInTerminal: false,
-    auth: state,
-    logger: Pino({ level: "silent" })
+    auth: {
+      creds: state.creds,
+      keys: makeCacheableSignalKeyStore(state.keys, logger)
+    },
+    logger
   });
   instances.set(tenantId, sock);
   states.set(tenantId, "disconnected");
   sock.ev.on("creds.update", saveCreds);
   sock.ev.on("connection.update", async (u) => {
-    const { qr, connection } = u;
+    const { qr, connection, lastDisconnect } = u;
     if (qr) {
       const dataUrl = await QRCode.toDataURL(qr);
       qrs.set(tenantId, dataUrl);
@@ -44,6 +53,14 @@ export async function createOrGetInstance(tenantId, wsNotify) {
     if (connection === "close") {
       states.set(tenantId, "disconnected");
       if (wsNotify) wsNotify(tenantId, { type: "status", status: "disconnected" });
+      const statusCode = lastDisconnect?.error?.output?.statusCode;
+      const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+      instances.delete(tenantId);
+      if (shouldReconnect) {
+        setTimeout(() => {
+          createOrGetInstance(tenantId, wsNotify).catch(() => {});
+        }, 5000);
+      }
     }
   });
   sock.ev.on("messages.upsert", (m) => {

@@ -8,10 +8,19 @@ import { createOrGetInstance, getQr, getStatus, logout } from "./instanceManager
 const app = express();
 app.use(express.json());
 
-const allowlist = (process.env.CORS_ORIGINS || process.env.CORS_ORIGIN || "*")
-  .split(",")
-  .map(s => s.trim())
-  .filter(Boolean);
+function parseOrigins(value) {
+  if (!value) return [];
+  return value
+    .split(",")
+    .map((s) => s.trim().replace(/^["'`]+|["'`]+$/g, ""))
+    .filter(Boolean);
+}
+
+const allowlistRaw = [
+  ...parseOrigins(process.env.CORS_ORIGINS),
+  ...parseOrigins(process.env.CORS_ORIGIN)
+];
+const allowlist = allowlistRaw.length ? allowlistRaw : ["*"];
 
 const corsOptions = {
   origin: function (origin, callback) {
