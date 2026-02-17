@@ -9,6 +9,9 @@ type Conversation = {
   time: string;
   auto: boolean;
   label?: string;
+  pinned?: boolean;
+  muted?: boolean;
+  archived?: boolean;
 };
 
 export default function Conversations() {
@@ -44,6 +47,10 @@ export default function Conversations() {
   const recordTimerRef = useRef<number | null>(null);
   const firstHistoryLoadedRef = useRef(false);
   const [contextMenu, setContextMenu] = useState<{ open: boolean; x: number; y: number; chatId: string | null }>({ open: false, x: 0, y: 0, chatId: null });
+  const [attachOpen, setAttachOpen] = useState(false);
+  const fileImgVidRef = useRef<HTMLInputElement | null>(null);
+  const fileDocRef = useRef<HTMLInputElement | null>(null);
+  const fileStickerRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -72,7 +79,10 @@ export default function Conversations() {
               name: c.contact?.name || extractPhone(c.contact?.wa_number || ""),
               last: lastMsg?.text || "",
               time: c.last_message_at ? new Date(c.last_message_at).toLocaleTimeString().slice(0, 5) : "",
-              auto: false
+              auto: false,
+              pinned: false,
+              muted: false,
+              archived: false
             };
           }).filter(c => c.id);
           setChats(formattedChats);
@@ -352,13 +362,18 @@ export default function Conversations() {
     if (recording === "recording") return;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mr = new MediaRecorder(stream, { mimeType: "audio/webm" });
+      const preferred = "audio/ogg;codecs=opus";
+      const fallback = "audio/webm";
+      const type = (window as any).MediaRecorder && (MediaRecorder as any).isTypeSupported && (MediaRecorder as any).isTypeSupported(preferred)
+        ? preferred
+        : fallback;
+      const mr = new MediaRecorder(stream, { mimeType: type });
       recordChunksRef.current = [];
       mr.ondataavailable = (e) => {
         if (e.data && e.data.size > 0) recordChunksRef.current.push(e.data);
       };
       mr.onstop = async () => {
-        const blob = new Blob(recordChunksRef.current, { type: "audio/webm" });
+        const blob = new Blob(recordChunksRef.current, { type });
         const dataUrl = await blobToDataURL(blob);
         setRecordDataUrl(dataUrl);
         setRecording("review");
@@ -460,6 +475,71 @@ export default function Conversations() {
       console.error("Falha ao enviar áudio:", err);
     }
   }
+  async function onPickImageVideo(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files || []);
+    if (!selectedId || files.length === 0) return;
+    const { data: { user } } = await supabase.auth.getUser();
+    const tenant = user ? `usr-${user.id}` : "default";
+    for (const f of files) {
+      const dataUrl = await fileToDataURL(f);
+      if (f.type.startsWith("image")) {
+        await fetch(`${WHATSAPP_API_URL}/whatsapp/send-image`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tenantId: tenant, jid: selectedId, dataUrl }) });
+      } else if (f.type.startsWith("video")) {
+        await fetch(`${WHATSAPP_API_URL}/whatsapp/send-video`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tenantId: tenant, jid: selectedId, dataUrl }) });
+      }
+    }
+    setAttachOpen(false);
+  }
+  async function onPickDocument(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files || []);
+    if (!selectedId || files.length === 0) return;
+    const { data: { user } } = await supabase.auth.getUser();
+    const tenant = user ? `usr-${user.id}` : "default";
+    for (const f of files) {
+      const dataUrl = await fileToDataURL(f);
+      await fetch(`${WHATSAPP_API_URL}/whatsapp/send-document`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tenantId: tenant, jid: selectedId, dataUrl, fileName: f.name, mime: f.type }) });
+    }
+    setAttachOpen(false);
+  }
+  async function onPickSticker(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files || []);
+    if (!selectedId || files.length === 0) return;
+    const { data: { user } } = await supabase.auth.getUser();
+    const tenant = user ? `usr-${user.id}` : "default";
+    for (const f of files) {
+      const dataUrl = await fileToDataURL(f);
+      await fetch(`${WHATSAPP_API_URL}/whatsapp/send-sticker`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tenantId: tenant, jid: selectedId, dataUrl }) });
+    }
+    setAttachOpen(false);
+  }
+  async function sendMyLocation() {
+    if (!selectedId) return;
+    const { data: { user } } = await supabase.auth.getUser();
+    const tenant = user ? `usr-${user.id}` : "default";
+    navigator.geolocation.getCurrentPosition(async (pos) => {
+      const lat = pos.coords.latitude;
+      const lng = pos.coords.longitude;
+      await fetch(`${WHATSAPP_API_URL}/whatsapp/send-location`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tenantId: tenant, jid: selectedId, lat, lng }) });
+      setAttachOpen(false);
+    }, () => {});
+  }
+  async function sendActiveContact() {
+    if (!selectedId) return;
+    const name = activeChat?.name || extractPhone(selectedId);
+    const phone = extractPhone(selectedId);
+    const vcard = [
+      "BEGIN:VCARD",
+      "VERSION:3.0",
+      `N:${name};;;;`,
+      `FN:${name}`,
+      `TEL;type=CELL;type=VOICE;waid=${phone}:${phone}`,
+      "END:VCARD"
+    ].join("\n");
+    const { data: { user } } = await supabase.auth.getUser();
+    const tenant = user ? `usr-${user.id}` : "default";
+    await fetch(`${WHATSAPP_API_URL}/whatsapp/send-contact`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tenantId: tenant, jid: selectedId, vcard, displayName: name }) });
+    setAttachOpen(false);
+  }
 
   function normalizeJid(jid: string) {
     if (!jid) return jid;
@@ -479,6 +559,14 @@ export default function Conversations() {
       reader.readAsDataURL(blob);
     });
   }
+  function fileToDataURL(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(String(reader.result));
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -486,7 +574,10 @@ export default function Conversations() {
     }
   }, [messages]);
 
-  const filtered = chats.filter(i => i.name.toLowerCase().includes(search.toLowerCase()));
+  const filtered = chats
+    .filter(i => !i.archived)
+    .filter(i => i.name.toLowerCase().includes(search.toLowerCase()))
+    .sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
   const activeChat = chats.find(c => c.id === selectedId);
 
   return (
@@ -563,6 +654,39 @@ export default function Conversations() {
                 style={{ width: "100%", textAlign: "left", padding: "8px 10px", border: "none", background: "transparent", cursor: "pointer" }}
               >
                 Abrir conversa
+              </button>
+              <button
+                onClick={() => {
+                  const chatId = contextMenu.chatId;
+                  if (!chatId) return;
+                  setChats(prev => prev.map(c => c.id === chatId ? { ...c, pinned: !c.pinned } : c));
+                  setContextMenu({ open: false, x: 0, y: 0, chatId: null });
+                }}
+                style={{ width: "100%", textAlign: "left", padding: "8px 10px", border: "none", background: "transparent", cursor: "pointer" }}
+              >
+                {chats.find(c => c.id === contextMenu.chatId)?.pinned ? "Desafixar" : "Fixar conversa"}
+              </button>
+              <button
+                onClick={() => {
+                  const chatId = contextMenu.chatId;
+                  if (!chatId) return;
+                  setChats(prev => prev.map(c => c.id === chatId ? { ...c, muted: !c.muted } : c));
+                  setContextMenu({ open: false, x: 0, y: 0, chatId: null });
+                }}
+                style={{ width: "100%", textAlign: "left", padding: "8px 10px", border: "none", background: "transparent", cursor: "pointer" }}
+              >
+                {chats.find(c => c.id === contextMenu.chatId)?.muted ? "Reativar notificações" : "Silenciar"}
+              </button>
+              <button
+                onClick={() => {
+                  const chatId = contextMenu.chatId;
+                  if (!chatId) return;
+                  setChats(prev => prev.map(c => c.id === chatId ? { ...c, archived: true } : c));
+                  setContextMenu({ open: false, x: 0, y: 0, chatId: null });
+                }}
+                style={{ width: "100%", textAlign: "left", padding: "8px 10px", border: "none", background: "transparent", cursor: "pointer" }}
+              >
+                Arquivar conversa
               </button>
               <button
                 onClick={async () => {
@@ -659,7 +783,7 @@ export default function Conversations() {
             {/* Input de Mensagem */}
             <footer style={{ padding: "10px 16px", background: "#f0f2f5", display: "flex", alignItems: "center", gap: 10, position: "relative", zIndex: 1 }}>
               <span style={{ fontSize: 24, color: "#54656f", cursor: "pointer" }}>😊</span>
-              <span style={{ fontSize: 24, color: "#54656f", cursor: "pointer" }}>＋</span>
+              <span style={{ fontSize: 24, color: "#54656f", cursor: "pointer" }} onClick={() => setAttachOpen(v => !v)}>＋</span>
               {recording === "idle" && (
                 <>
                   <input 
@@ -674,6 +798,18 @@ export default function Conversations() {
                   ) : (
                     <button onClick={startRecording} style={{ padding: "8px 12px" }}>🎤</button>
                   )}
+                  {attachOpen && (
+                    <div style={{ position: "absolute", bottom: 56, left: 60, background: "#fff", border: "1px solid #d1d7db", borderRadius: 12, boxShadow: "0 8px 24px rgba(0,0,0,0.12)", padding: 8, display: "grid", gap: 6, zIndex: 9999, minWidth: 260 }}>
+                      <button onClick={() => fileImgVidRef.current?.click()} style={{ textAlign: "left", padding: "8px 10px", borderRadius: 8, border: "none", background: "transparent", cursor: "pointer" }}>Fotos e Vídeos</button>
+                      <button onClick={() => fileDocRef.current?.click()} style={{ textAlign: "left", padding: "8px 10px", borderRadius: 8, border: "none", background: "transparent", cursor: "pointer" }}>Documento</button>
+                      <button onClick={() => fileStickerRef.current?.click()} style={{ textAlign: "left", padding: "8px 10px", borderRadius: 8, border: "none", background: "transparent", cursor: "pointer" }}>Sticker</button>
+                      <button onClick={sendMyLocation} style={{ textAlign: "left", padding: "8px 10px", borderRadius: 8, border: "none", background: "transparent", cursor: "pointer" }}>Localização</button>
+                      <button onClick={sendActiveContact} style={{ textAlign: "left", padding: "8px 10px", borderRadius: 8, border: "none", background: "transparent", cursor: "pointer" }}>Contato</button>
+                    </div>
+                  )}
+                  <input ref={fileImgVidRef} type="file" accept="image/*,video/*" multiple style={{ display: "none" }} onChange={onPickImageVideo} />
+                  <input ref={fileDocRef} type="file" style={{ display: "none" }} onChange={onPickDocument} />
+                  <input ref={fileStickerRef} type="file" accept="image/webp" style={{ display: "none" }} onChange={onPickSticker} />
                 </>
               )}
               {recording === "recording" && (

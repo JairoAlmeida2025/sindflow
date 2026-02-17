@@ -27,6 +27,33 @@ app.use((req, res, next) => {
 
 app.use(express.json());
 
+function normalizeJidInput(jid) {
+  let norm = String(jid || "");
+  if (!norm) return norm;
+  if (norm.endsWith("@lid")) norm = norm.replace("@lid", "@s.whatsapp.net");
+  if (norm.endsWith("@c.us")) norm = norm.replace("@c.us", "@s.whatsapp.net");
+  if (!norm.includes("@")) norm = `${norm}@s.whatsapp.net`;
+  return norm;
+}
+
+function parseDataUrl(dataUrl) {
+  const match = String(dataUrl || "").match(/^data:(.*?);base64,(.*)$/);
+  if (!match) return null;
+  const mime = match[1];
+  const b64 = match[2];
+  const buffer = Buffer.from(b64, "base64");
+  return { buffer, mime };
+}
+
+async function getBufferFromUrl(url) {
+  const res = await fetch(String(url));
+  if (!res.ok) throw new Error(`fetch failed: ${res.status}`);
+  const arrayBuf = await res.arrayBuffer();
+  const buffer = Buffer.from(arrayBuf);
+  const mime = res.headers.get("content-type") || "application/octet-stream";
+  return { buffer, mime };
+}
+
 // Endpoint de teste de CORS e saude
 app.get("/health", (req, res) => res.json({ ok: true, timestamp: new Date() }));
 app.get("/debug-cors", (req, res) => {
@@ -90,7 +117,7 @@ app.post("/whatsapp/send-text", async (req, res) => {
   if (!sock) return res.status(404).json({ ok: false, error: "instance not found" });
 
   try {
-    const sent = await sock.sendMessage(jid, { text });
+    const sent = await sock.sendMessage(normalizeJidInput(jid), { text });
     return res.json({ ok: true, data: sent });
   } catch (err) {
     console.error("Error sending message:", err);
@@ -110,14 +137,124 @@ app.post("/whatsapp/send-audio", async (req, res) => {
   try {
     const match = String(dataUrl).match(/^data:(.*?);base64,(.*)$/);
     if (!match) return res.status(400).json({ ok: false, error: "invalid dataUrl" });
-    const mime = match[1] || "audio/ogg";
+    let mime = match[1] || "audio/ogg";
     const b64 = match[2];
     const buffer = Buffer.from(b64, "base64");
-    const sent = await sock.sendMessage(jid, { audio: buffer, mimetype: mime, ptt: !!ptt });
+    const norm = normalizeJidInput(jid);
+    if (mime === "audio/webm") {
+      mime = "audio/ogg"; // força container aceito
+    }
+    const sent = await sock.sendMessage(norm, { audio: buffer, mimetype: mime, ptt: true });
     return res.json({ ok: true, data: sent });
   } catch (err) {
     console.error("Error sending audio:", err);
     return res.status(500).json({ ok: false, error: "failed to send audio" });
+  }
+});
+
+app.post("/whatsapp/send-image", async (req, res) => {
+  const tenantId = getTenantId(req);
+  if (!tenantId) return res.status(400).json({ ok: false, error: "missing tenantId" });
+  const { jid, dataUrl, url, caption } = req.body || {};
+  if (!jid || (!dataUrl && !url)) return res.status(400).json({ ok: false, error: "missing jid or media source" });
+  const sock = getInstance(tenantId);
+  if (!sock) return res.status(404).json({ ok: false, error: "instance not found" });
+  try {
+    const norm = normalizeJidInput(jid);
+    const parsed = dataUrl ? parseDataUrl(dataUrl) : await getBufferFromUrl(url);
+    const sent = await sock.sendMessage(norm, { image: parsed.buffer, mimetype: parsed.mime || "image/jpeg", caption: caption || "" });
+    return res.json({ ok: true, data: sent });
+  } catch (err) {
+    console.error("Error sending image:", err);
+    return res.status(500).json({ ok: false, error: "failed to send image" });
+  }
+});
+
+app.post("/whatsapp/send-video", async (req, res) => {
+  const tenantId = getTenantId(req);
+  if (!tenantId) return res.status(400).json({ ok: false, error: "missing tenantId" });
+  const { jid, dataUrl, url, caption } = req.body || {};
+  if (!jid || (!dataUrl && !url)) return res.status(400).json({ ok: false, error: "missing jid or media source" });
+  const sock = getInstance(tenantId);
+  if (!sock) return res.status(404).json({ ok: false, error: "instance not found" });
+  try {
+    const norm = normalizeJidInput(jid);
+    const parsed = dataUrl ? parseDataUrl(dataUrl) : await getBufferFromUrl(url);
+    const sent = await sock.sendMessage(norm, { video: parsed.buffer, mimetype: parsed.mime || "video/mp4", caption: caption || "" });
+    return res.json({ ok: true, data: sent });
+  } catch (err) {
+    console.error("Error sending video:", err);
+    return res.status(500).json({ ok: false, error: "failed to send video" });
+  }
+});
+
+app.post("/whatsapp/send-document", async (req, res) => {
+  const tenantId = getTenantId(req);
+  if (!tenantId) return res.status(400).json({ ok: false, error: "missing tenantId" });
+  const { jid, dataUrl, url, fileName, mime } = req.body || {};
+  if (!jid || (!dataUrl && !url)) return res.status(400).json({ ok: false, error: "missing jid or media source" });
+  const sock = getInstance(tenantId);
+  if (!sock) return res.status(404).json({ ok: false, error: "instance not found" });
+  try {
+    const norm = normalizeJidInput(jid);
+    const parsed = dataUrl ? parseDataUrl(dataUrl) : await getBufferFromUrl(url);
+    const sent = await sock.sendMessage(norm, { document: parsed.buffer, fileName: fileName || "arquivo", mimetype: mime || parsed.mime || "application/octet-stream" });
+    return res.json({ ok: true, data: sent });
+  } catch (err) {
+    console.error("Error sending document:", err);
+    return res.status(500).json({ ok: false, error: "failed to send document" });
+  }
+});
+
+app.post("/whatsapp/send-sticker", async (req, res) => {
+  const tenantId = getTenantId(req);
+  if (!tenantId) return res.status(400).json({ ok: false, error: "missing tenantId" });
+  const { jid, dataUrl, url } = req.body || {};
+  if (!jid || (!dataUrl && !url)) return res.status(400).json({ ok: false, error: "missing jid or media source" });
+  const sock = getInstance(tenantId);
+  if (!sock) return res.status(404).json({ ok: false, error: "instance not found" });
+  try {
+    const norm = normalizeJidInput(jid);
+    const parsed = dataUrl ? parseDataUrl(dataUrl) : await getBufferFromUrl(url);
+    const sent = await sock.sendMessage(norm, { sticker: parsed.buffer });
+    return res.json({ ok: true, data: sent });
+  } catch (err) {
+    console.error("Error sending sticker:", err);
+    return res.status(500).json({ ok: false, error: "failed to send sticker" });
+  }
+});
+
+app.post("/whatsapp/send-location", async (req, res) => {
+  const tenantId = getTenantId(req);
+  if (!tenantId) return res.status(400).json({ ok: false, error: "missing tenantId" });
+  const { jid, lat, lng, name, address } = req.body || {};
+  if (!jid || typeof lat !== "number" || typeof lng !== "number") return res.status(400).json({ ok: false, error: "missing jid or coordinates" });
+  const sock = getInstance(tenantId);
+  if (!sock) return res.status(404).json({ ok: false, error: "instance not found" });
+  try {
+    const norm = normalizeJidInput(jid);
+    const sent = await sock.sendMessage(norm, { location: { degreesLatitude: lat, degreesLongitude: lng, name, address } });
+    return res.json({ ok: true, data: sent });
+  } catch (err) {
+    console.error("Error sending location:", err);
+    return res.status(500).json({ ok: false, error: "failed to send location" });
+  }
+});
+
+app.post("/whatsapp/send-contact", async (req, res) => {
+  const tenantId = getTenantId(req);
+  if (!tenantId) return res.status(400).json({ ok: false, error: "missing tenantId" });
+  const { jid, vcard, displayName } = req.body || {};
+  if (!jid || !vcard) return res.status(400).json({ ok: false, error: "missing jid or vcard" });
+  const sock = getInstance(tenantId);
+  if (!sock) return res.status(404).json({ ok: false, error: "instance not found" });
+  try {
+    const norm = normalizeJidInput(jid);
+    const sent = await sock.sendMessage(norm, { contacts: { displayName: displayName || "Contato", contacts: [{ vcard }] } });
+    return res.json({ ok: true, data: sent });
+  } catch (err) {
+    console.error("Error sending contact:", err);
+    return res.status(500).json({ ok: false, error: "failed to send contact" });
   }
 });
 

@@ -79,7 +79,7 @@ root.render(
            <Route index element={<Navigate to="conversas" replace />} />
         </Route>
         
-        <Route path="/master/login" element={<Login />} /> 
+        <Route path="/master/login" element={<MasterLogin />} /> 
       </Routes>
     </BrowserRouter>
   </React.StrictMode>
