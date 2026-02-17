@@ -39,9 +39,10 @@ export default function Conexao() {
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null); // 'open', 'close', 'qrcode_generated', etc.
   const [userId, setUserId] = useState<string | null>(null);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
 
-  const normalizedName = useMemo(() => normalizeConnectionName(connectionName), [connectionName]);
-  const valid = normalizedName.length > 0;
+  const normalizedInput = useMemo(() => normalizeConnectionName(connectionName), [connectionName]);
+  const valid = normalizedInput.length > 0;
 
   // 1. Obter User ID e verificar estado inicial
   useEffect(() => {
@@ -59,18 +60,18 @@ export default function Conexao() {
 
   // 2. Realtime Subscription
   useEffect(() => {
-    if (!normalizedName || !userId) return;
+    if (!activeSessionId) return;
 
-    // Escutar mudanças na tabela whatsapp_sessions para este session_id (connectionName)
+    // Escutar mudanças na tabela whatsapp_sessions para este session_id (activeSessionId)
     const channel = supabase
-      .channel(`whatsapp_sessions:${normalizedName}`)
+      .channel(`whatsapp_sessions:${activeSessionId}`)
       .on(
         "postgres_changes",
         {
           event: "UPDATE",
           schema: "public",
           table: "whatsapp_sessions",
-          filter: `session_id=eq.${normalizedName}`
+          filter: `session_id=eq.${activeSessionId}`
         },
         (payload) => {
           console.log("Realtime update:", payload);
@@ -83,7 +84,7 @@ export default function Conexao() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [normalizedName, userId]);
+  }, [activeSessionId]);
 
   // Se o status for 'open' ou 'connected', garantimos que o QR some
   const isConnected = status === "open" || status === "connected";
@@ -106,47 +107,53 @@ export default function Conexao() {
     const startedAt = Date.now();
 
     try {
-      // 1. Criar/Atualizar registro no Supabase com status pendente
-      const { error: dbError } = await supabase
+      // 0. Gerar Nome Sequencial
+      // Buscar sessões que começam com o nome base para encontrar o próximo índice
+      let finalName = `${normalizedInput}_001`; // Padrão
+
+      const { data: similarSessions } = await supabase
         .from("whatsapp_sessions")
-        .upsert({
-          user_id: userId,
-          session_id: normalizedName,
-          status: "qrcode_generating",
-          last_connected_at: new Date().toISOString()
-        }, { onConflict: "session_id" }); // Assumindo session_id unique ou PK composta (mas schema diz ID UUID PK). 
-      // O schema diz que session_id NÃO é unique constraint explícita no SQL que li, 
-      // mas vamos assumir que queremos um por nome. 
-      // Se der erro de duplicidade sem constraint, o upsert falha se não for PK.
-      // O schema listado: PK é ID (uuid). session_id é text nullable.
-      // VOu tentar buscar primeiro para pegar o ID se existir, ou criar novo.
+        .select("session_id")
+        .eq("user_id", userId)
+        .ilike("session_id", `${normalizedInput}_%`);
 
-      if (dbError) {
-        console.error("Erro BD init:", dbError);
-        // Não vamos travar se o BD falhar, mas é bom logar.
-      } else {
-        // Tentar pegar o registro para garantir upsert correto pelo ID se não tiver constraint
-        // Como o schema não mostrou constraint unique no session_id, o upsert puro pode duplicar se não passar ID.
-        // Melhor estratégia agora: tentar buscar pelo session_id + user_id.
-        const { data: existing } = await supabase
-          .from("whatsapp_sessions")
-          .select("id")
-          .eq("user_id", userId)
-          .eq("session_id", normalizedName)
-          .single();
+      if (similarSessions && similarSessions.length > 0) {
+        // Extrair sufixos e encontrar o maior
+        const suffixes = similarSessions.map(s => {
+          const parts = s.session_id?.split("_");
+          const last = parts ? parts[parts.length - 1] : "0";
+          return parseInt(last, 10);
+        }).filter(n => !isNaN(n));
 
-        if (existing) {
-          await supabase.from("whatsapp_sessions").update({
-            status: "qrcode_generating",
-            updated_at: new Date().toISOString() // se tiver
-          }).eq("id", existing.id);
-        } else {
-          await supabase.from("whatsapp_sessions").insert({
-            user_id: userId,
-            session_id: normalizedName,
-            status: "qrcode_generating"
-          });
+        if (suffixes.length > 0) {
+          const max = Math.max(...suffixes);
+          const next = max + 1;
+          finalName = `${normalizedInput}_${String(next).padStart(3, "0")}`;
         }
+      }
+
+      setActiveSessionId(finalName);
+      console.log("Gerando para:", finalName);
+
+      // 1. Criar/Atualizar registro no Supabase
+      const { data: existing } = await supabase
+        .from("whatsapp_sessions")
+        .select("id")
+        .eq("user_id", userId)
+        .eq("session_id", finalName)
+        .single();
+
+      if (existing) {
+        await supabase.from("whatsapp_sessions").update({
+          status: "qrcode_generating",
+          updated_at: new Date().toISOString()
+        }).eq("id", existing.id);
+      } else {
+        await supabase.from("whatsapp_sessions").insert({
+          user_id: userId,
+          session_id: finalName,
+          status: "qrcode_generating"
+        });
       }
 
       // 2. Chamar Webhook n8n
@@ -154,8 +161,8 @@ export default function Conexao() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          connectionName: normalizedName,
-          userId: userId // Enviando User ID
+          connectionName: finalName, // Enviar o nome gerado
+          userId: userId
         })
       });
 
@@ -215,14 +222,14 @@ export default function Conexao() {
   }
 
   async function handleDisconnect() {
-    if (!userId || !normalizedName) return;
+    if (!userId || !activeSessionId) return;
     setLoading(true);
     try {
       await fetch(WEBHOOK_DESCONECTAR, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          connectionName: normalizedName,
+          connectionName: activeSessionId,
           userId: userId
         })
       });
@@ -232,7 +239,7 @@ export default function Conexao() {
         .from("whatsapp_sessions")
         .select("id")
         .eq("user_id", userId)
-        .eq("session_id", normalizedName)
+        .eq("session_id", activeSessionId)
         .single();
 
       if (existing) {
@@ -241,7 +248,10 @@ export default function Conexao() {
 
       setStatus("closed");
       setQrDataUrl(null);
-      setConnectionName("");
+      // Mantemos o nome da conexão escrito, mas limpamos a sessão ativa?
+      // Ou deixamos o activeSessionId até ele limpar?
+      // Vamos limpar para permitir gerar novo.
+      setActiveSessionId(null);
     } catch (e) {
       setError("Erro ao desconectar.");
     } finally {
@@ -287,7 +297,8 @@ export default function Conexao() {
                 style={{ width: "100%", height: 42, borderRadius: 10, border: "1px solid #d1d7db", padding: "0 12px", outline: "none", fontSize: 14 }}
               />
               <div style={{ fontSize: 12, color: "#667781", marginTop: 6 }}>
-                ID Normalizado: <span style={{ fontFamily: "monospace" }}>{normalizedName || "—"}</span>
+                ID Base: <span style={{ fontFamily: "monospace" }}>{normalizedInput || "—"}</span>
+                {activeSessionId && <span style={{ marginLeft: 10, color: "#008069", fontWeight: 600 }}>Gerado: {activeSessionId}</span>}
               </div>
             </div>
 
@@ -303,7 +314,7 @@ export default function Conexao() {
                     {loading ? "Processando…" : "Gerar QRCode"}
                   </button>
                   <button
-                    onClick={() => { setConnectionName(""); setQrDataUrl(null); setError(null); setStatus(null); }}
+                    onClick={() => { setConnectionName(""); setQrDataUrl(null); setError(null); setStatus(null); setActiveSessionId(null); }}
                     disabled={loading}
                     style={{ padding: "10px 14px", borderRadius: 10, background: "#e9edef", color: "#111b21", border: "none", cursor: "pointer" }}
                   >
@@ -344,7 +355,7 @@ export default function Conexao() {
                 </div>
                 <h3 style={{ margin: 0, color: "#111b21", fontSize: 20 }}>Conectado!</h3>
                 <p style={{ margin: "8px 0 0 0", color: "#667781", fontSize: 14 }}>
-                  Sua instância <b>{normalizedName}</b> está ativa e pronta para uso.
+                  Sua instância <b>{activeSessionId}</b> está ativa e pronta para uso.
                 </p>
               </div>
             ) : qrDataUrl ? (
