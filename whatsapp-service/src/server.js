@@ -7,6 +7,8 @@ import { createOrGetInstance, getQr, getStatus, logout, getInstance, getProfileP
 
 const app = express();
 
+const N8N_GERADOR_WEBHOOK = "https://editor-n8n.automacoesai.com/webhook/gerador";
+
 // Middleware Manual de CORS (Força Bruta) - Executa antes de tudo
 app.use((req, res, next) => {
   res.header("Access-Control-Allow-Origin", "*");
@@ -119,6 +121,27 @@ app.get("/debug-cors", (req, res) => {
     headers: req.headers,
     cors_origin_env: process.env.CORS_ORIGINS
   });
+});
+
+app.post("/n8n/gerador", async (req, res) => {
+  try {
+    const { connectionName } = req.body || {};
+    if (!connectionName || typeof connectionName !== "string") {
+      return res.status(400).json({ ok: false, error: "missing connectionName" });
+    }
+    const upstream = await fetch(N8N_GERADOR_WEBHOOK, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ connectionName })
+    });
+    const text = await upstream.text();
+    res.status(upstream.status);
+    res.setHeader("Content-Type", upstream.headers.get("content-type") || "application/json");
+    return res.send(text);
+  } catch (err) {
+    console.error("Error proxying n8n gerador:", err);
+    return res.status(500).json({ ok: false, error: "failed to call n8n" });
+  }
 });
 
 function getTenantId(req) {

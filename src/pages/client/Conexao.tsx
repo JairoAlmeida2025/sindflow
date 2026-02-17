@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
+import { WHATSAPP_API_URL } from "../../lib/config";
 
-const WEBHOOK_URL = "https://editor-n8n.automacoesai.com/webhook/gerador";
+const WEBHOOK_URL = `${WHATSAPP_API_URL}/n8n/gerador`;
 
 function normalizeConnectionName(input: string) {
   let v = String(input || "").trim().toLowerCase();
@@ -10,17 +11,18 @@ function normalizeConnectionName(input: string) {
 }
 
 function buildQrDataUrl(payload: any) {
-  const mimeType = String(payload?.mimeType || payload?.mime || "image/png");
+  const root = Array.isArray(payload) ? payload?.[0] : payload;
+  const mimeType = String(root?.mimeType || root?.mime || "image/png");
   const raw =
-    payload?.qrCodeBase64 ||
-    payload?.qrcodeBase64 ||
-    payload?.qr_base64 ||
-    payload?.qr ||
-    payload?.qrcode ||
-    payload?.base64 ||
-    payload?.imageBase64 ||
-    payload?.dataUrl ||
-    payload?.dataURL ||
+    root?.qrCodeBase64 ||
+    root?.qrcodeBase64 ||
+    root?.qr_base64 ||
+    root?.qr ||
+    root?.qrcode ||
+    root?.base64 ||
+    root?.imageBase64 ||
+    root?.dataUrl ||
+    root?.dataURL ||
     null;
 
   if (!raw) return null;
@@ -119,7 +121,7 @@ export default function Conexao() {
 
       setError("Resposta do n8n não contém um QRCode em base64.");
     } catch (e) {
-      setError("Falha de rede ao chamar o n8n. Verifique CORS e tente novamente.");
+      setError("Falha de rede ao chamar o n8n. Tente novamente.");
     } finally {
       setLoading(false);
     }
