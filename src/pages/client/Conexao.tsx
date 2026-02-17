@@ -234,13 +234,16 @@ export default function Conexao() {
     if (!userId || !activeSessionId) return;
     setLoading(true);
     try {
+      const payload = {
+        connectionName: activeSessionId,
+        userId: userId
+      };
+      console.log("Disconnecting. Payload:", payload);
+
       await fetch(WEBHOOK_DESCONECTAR, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          connectionName: activeSessionId,
-          userId: userId
-        })
+        body: JSON.stringify(payload)
       });
 
       // Atualizar banco localmente para refletir desconexão imediata
