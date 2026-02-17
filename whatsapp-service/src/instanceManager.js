@@ -64,7 +64,7 @@ export async function createOrGetInstance(tenantId, wsNotify) {
       }
     }
   });
-  sock.ev.on("messages.upsert", (m) => {
+  sock.ev.on("messages.upsert", async (m) => {
     if (wsNotify) wsNotify(tenantId, { type: "messages", payload: m });
     // Persist messages to Supabase
     for (const msg of m.messages) {
@@ -86,7 +86,12 @@ export async function createOrGetInstance(tenantId, wsNotify) {
           })
         );
       } catch {}
-      saveMessage(tenantId, msg);
+      try {
+        const saved = await saveMessage(tenantId, msg);
+        if (wsNotify && saved?.mediaUrl) {
+          wsNotify(tenantId, { type: "media", payload: { remoteJid: saved.remoteJid, url: saved.mediaUrl, kind: saved.messageType, text: saved.text } });
+        }
+      } catch {}
     }
   });
 
@@ -107,6 +112,16 @@ export async function createOrGetInstance(tenantId, wsNotify) {
         } 
       });
     }
+  });
+  
+  sock.ev.on("chats.update", (updates) => {
+    if (wsNotify) wsNotify(tenantId, { type: "chat_update", payload: updates });
+  });
+  sock.ev.on("chats.delete", (deletes) => {
+    if (wsNotify) wsNotify(tenantId, { type: "chat_delete", payload: deletes });
+  });
+  sock.ev.on("contacts.update", (updates) => {
+    if (wsNotify) wsNotify(tenantId, { type: "contacts_update", payload: updates });
   });
 
   return sock;

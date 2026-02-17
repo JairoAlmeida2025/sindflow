@@ -25,27 +25,12 @@ export default function Conversations() {
   const [profilePics, setProfilePics] = useState<Record<string, string>>({});
   
   // Audio feedback via WebAudio (sem arquivos)
-  const audioCtxRef = useRef<AudioContext | null>(null);
-  function playBeep(freq: number, ms = 140) {
-    try {
-      const ctx = audioCtxRef.current || new (window.AudioContext || (window as any).webkitAudioContext)();
-      audioCtxRef.current = ctx;
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = "sine";
-      osc.frequency.value = freq;
-      gain.gain.value = 0.2;
-      osc.connect(gain).connect(ctx.destination);
-      osc.start();
-      setTimeout(() => {
-        osc.stop();
-        osc.disconnect();
-        gain.disconnect();
-      }, ms);
-    } catch {}
-  }
-  const playIncoming = () => playBeep(880);
-  const playSend = () => playBeep(660);
+  const audioIncoming = useRef<HTMLAudioElement | null>(null);
+  const audioSend = useRef<HTMLAudioElement | null>(null);
+  useEffect(() => {
+    audioIncoming.current = new Audio("/sounds/message_incoming.mp3");
+    audioSend.current = new Audio("/sounds/message_send.mp3");
+  }, []);
 
   // Gravação de áudio
   const [isRecording, setIsRecording] = useState(false);
@@ -160,7 +145,7 @@ export default function Conversations() {
             
             // Tocar som se houver mensagem nova recebida (não enviada por mim)
             const hasIncoming = newMessages.some((m: any) => !m.key.fromMe);
-            if (hasIncoming) playIncoming();
+            if (hasIncoming) audioIncoming.current?.play().catch(() => {});
 
             setMessages((prev) => {
               // Evitar duplicatas baseado no key.id
@@ -206,6 +191,49 @@ export default function Conversations() {
               });
             }
           }
+          if (msg.type === "media") {
+            const { remoteJid, url, kind, text } = msg.payload || {};
+            const add = {
+              key: { remoteJid: normalizeJid(remoteJid || ""), fromMe: false, id: "media-" + Date.now() },
+              message: {
+                ...(kind === "imageMessage" ? { imageMessage: { url, caption: text || "" } } : {}),
+                ...(kind === "videoMessage" ? { videoMessage: { url } } : {}),
+                ...(kind === "audioMessage" ? { audioMessage: { url } } : {}),
+                ...(kind === "documentMessage" ? { documentMessage: { url, mimetype: "application/octet-stream" } } : {}),
+                ...(text ? { conversation: text } : {})
+              },
+              messageTimestamp: Date.now() / 1000
+            };
+            setMessages(prev => [...prev, add]);
+          }
+          if (msg.type === "chat_update") {
+            const updates = msg.payload || [];
+            setChats(prev => {
+              const map = new Map(prev.map(c => [c.id, c]));
+              for (const u of updates) {
+                const id = normalizeJid(u.id);
+                const name = u.name || u.subject || map.get(id)?.name || id.replace("@s.whatsapp.net", "");
+                const last = map.get(id)?.last || "";
+                const time = map.get(id)?.time || "";
+                map.set(id, { id, name, last, time, auto: false });
+              }
+              return Array.from(map.values()).sort((a,b) => (b.time || "").localeCompare(a.time || ""));
+            });
+          }
+          if (msg.type === "chat_delete") {
+            const deletes = msg.payload || [];
+            const ids = new Set(deletes.map((d: any) => normalizeJid(d)));
+            setChats(prev => prev.filter(c => !ids.has(c.id)));
+            setMessages(prev => prev.filter(m => !ids.has(normalizeJid(m.key?.remoteJid))));
+          }
+          if (msg.type === "contacts_update") {
+            const updates = msg.payload || [];
+            setChats(prev => prev.map(c => {
+              const up = updates.find((u: any) => normalizeJid(u.id) === c.id);
+              if (!up) return c;
+              return { ...c, name: up.name || up.notify || c.name };
+            }));
+          }
         } catch {}
       };
       wsRef.current = ws;
@@ -229,7 +257,7 @@ export default function Conversations() {
       status: "sending"
     };
     setMessages(prev => [...prev, optimisticMsg]);
-    playSend();
+    audioSend.current?.play().catch(() => {});
 
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -416,7 +444,10 @@ export default function Conversations() {
                 .map((m, idx) => {
                   const fromMe = m.key?.fromMe;
                   const text = m.message?.conversation || m.message?.extendedTextMessage?.text || "";
-                  if (!text) return null;
+                  const imageUrl = m.message?.imageMessage?.url;
+                  const audioUrl = m.message?.audioMessage?.url || (m.message?.documentMessage?.mimetype?.startsWith("audio") ? m.message?.documentMessage?.url : null);
+                  const videoUrl = m.message?.videoMessage?.url;
+                  if (!text && !imageUrl && !audioUrl && !videoUrl) return null;
                   return (
                     <div key={idx} style={{ display: "flex", justifyContent: fromMe ? "flex-end" : "flex-start", marginBottom: 10 }}>
                       <div style={{ 
@@ -430,7 +461,10 @@ export default function Conversations() {
                         color: "#111b21",
                         position: "relative"
                       }}>
-                        <div>{text}</div>
+                        {text && <div>{text}</div>}
+                        {imageUrl && <img src={imageUrl} alt="" style={{ maxWidth: "100%", borderRadius: 8, marginTop: 6 }} />}
+                        {audioUrl && <audio controls src={audioUrl} style={{ width: "100%", marginTop: 6 }} />}
+                        {videoUrl && <video controls src={videoUrl} style={{ width: "100%", marginTop: 6, borderRadius: 8 }} />}
                         <div style={{ fontSize: 11, color: "#667781", textAlign: "right", marginTop: 4, float: "right", marginLeft: 10 }}>
                           {new Date((m.messageTimestamp || Date.now() / 1000) * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                         </div>
@@ -456,6 +490,36 @@ export default function Conversations() {
               ) : (
                 <button onMouseDown={startRecording} onMouseUp={stopRecording} onTouchStart={startRecording} onTouchEnd={stopRecording} style={{ padding: "8px 12px" }}>
                   {isRecording ? "Gravando..." : "🎤"}
+                </button>
+              )}
+              {selectedId && (
+                <button
+                  onClick={async () => {
+                    try {
+                      const { data: { user } } = await supabase.auth.getUser();
+                      const { data: conv } = await supabase
+                        .from("conversations")
+                        .select("id")
+                        .eq("user_id", user?.id)
+                        .eq("contact_id", (
+                          await supabase.from("contacts").select("id").eq("user_id", user?.id).eq("wa_number", selectedId).single()
+                        ).data?.id)
+                        .single();
+                      if (conv?.id) {
+                        await supabase.from("messages").delete().eq("conversation_id", conv.id);
+                        await supabase.from("conversations").delete().eq("id", conv.id);
+                      }
+                      setChats(prev => prev.filter(c => c.id !== selectedId));
+                      setMessages(prev => prev.filter(m => m.key?.remoteJid !== selectedId));
+                      setSelectedId(null);
+                    } catch (err) {
+                      console.error("Falha ao excluir conversa:", err);
+                    }
+                  }}
+                  className="btn-secondary"
+                  style={{ padding: "8px 12px" }}
+                >
+                  Excluir conversa
                 </button>
               )}
             </footer>

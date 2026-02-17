@@ -141,6 +141,12 @@ export async function saveMessage(tenantId, message) {
 
     if (msgError) throw new Error(`Message error: ${msgError.message}`);
 
+    return {
+      mediaUrl,
+      messageType,
+      remoteJid: remoteJidNorm,
+      text: content
+    };
   } catch (err) {
     console.error("Failed to save message to Supabase:", err);
   }
@@ -171,7 +177,7 @@ function getContentType(type) {
     switch (type) {
         case "imageMessage": return "jpg";
         case "videoMessage": return "mp4";
-        case "audioMessage": return "mp3";
+        case "audioMessage": return "ogg";
         case "stickerMessage": return "webp";
         case "documentMessage": return "bin"; // or extract extension from fileName
         default: return "bin";

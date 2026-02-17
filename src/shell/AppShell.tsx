@@ -29,6 +29,7 @@ export default function AppShell() {
               position: "absolute",
               right: 16,
               top: 56,
+              zIndex: 9999,
               background: "#fff",
               borderRadius: 10,
               boxShadow: "0 12px 30px rgba(0,0,0,0.15)",

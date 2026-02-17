@@ -3,7 +3,9 @@ import { supabase } from "../../lib/supabase";
 import { WHATSAPP_API_URL } from "../../lib/config";
 
 export default function WhatsappConnect() {
-  const [status, setStatus] = useState<"conectado" | "desconectado" | "reconectando">("desconectado");
+  const [status, setStatus] = useState<"conectado" | "desconectado" | "reconectando">(
+    (localStorage.getItem("whatsapp_status") as any) || "desconectado"
+  );
   const [number, setNumber] = useState<string | null>(null);
   const [qrBase64, setQrBase64] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -67,13 +69,27 @@ export default function WhatsappConnect() {
   }
 
   useEffect(() => {
-    connect();
+    const init = (async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      const name = user ? `usr-${user.id}` : "default";
+      setInstanceName(name);
+      try {
+        const res = await fetch(`${WHATSAPP_API_URL}/whatsapp/status?tenantId=${encodeURIComponent(name)}`);
+        const json = await res.json();
+        const s = json.status || "desconectado";
+        const mapped = s === "connected" ? "conectado" : s === "qr_required" ? "reconectando" : "desconectado";
+        setStatus(mapped as any);
+        localStorage.setItem("whatsapp_status", mapped);
+      } catch {}
+    })();
     const id = setInterval(async () => {
       const name = instanceName || `usr-${(await supabase.auth.getUser()).data.user?.id}`;
       const res = await fetch(`${WHATSAPP_API_URL}/whatsapp/status?tenantId=${encodeURIComponent(name)}`);
       const json = await res.json();
       const s = json.status || "desconectado";
-      setStatus(s === "connected" ? "conectado" : s === "qr_required" ? "reconectando" : "desconectado");
+      const mapped = s === "connected" ? "conectado" : s === "qr_required" ? "reconectando" : "desconectado";
+      setStatus(mapped as any);
+      localStorage.setItem("whatsapp_status", mapped);
     }, 5000);
     return () => clearInterval(id);
   }, []);
