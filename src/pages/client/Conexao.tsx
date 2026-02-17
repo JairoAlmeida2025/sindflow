@@ -108,22 +108,26 @@ export default function Conexao() {
     try {
       // 1. Chamar Webhook para deletar na Evolution/Backend
       if (activeSessionId) {
-        try {
-          await fetch(WEBHOOK_DELETAR, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              connectionName: activeSessionId,
-              userId: userId
-            })
-          });
-        } catch (err) {
-          console.error("Erro ao chamar webhook de deletar:", err);
-          // Não vamos travar se o webhook falhar, pois o usuario quer limpar de qualquer jeito
+        const res = await fetch(WEBHOOK_DELETAR, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            connectionName: activeSessionId,
+            userId: userId
+          })
+        });
+
+        if (!res.ok) {
+          // Se falhar na Evolution, NÃO deletamos localmente para evitar inconsistência
+          const txt = await res.text();
+          console.error("Falha ao deletar na Evolution:", res.status, txt);
+          throw new Error(`Falha ao deletar instância remota (${res.status}). Tente novamente.`);
         }
+
+        // Opcional: Verificar mensagem de sucesso se necessário, mas res.ok já garante que a requisição foi
       }
 
-      // 2. Deletar todas as sessões deste usuário localmente
+      // 2. Deletar todas as sessões deste usuário localmente SOMENTE SE o webhook passou
       await supabase
         .from("whatsapp_sessions")
         .delete()
@@ -135,9 +139,9 @@ export default function Conexao() {
       setStatus(null);
       setActiveSessionId(null);
       setDisconnectMessage(null);
-    } catch (e) {
+    } catch (e: any) {
       console.error(e);
-      setError("Erro ao limpar sessão antiga.");
+      setError(e.message || "Erro ao limpar sessão antiga.");
     } finally {
       setLoading(false);
     }
