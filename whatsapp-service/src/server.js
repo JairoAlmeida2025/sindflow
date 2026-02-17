@@ -7,11 +7,29 @@ import { createOrGetInstance, getQr, getStatus, logout } from "./instanceManager
 
 const app = express();
 app.use(express.json());
-app.use(cors({
-  origin: process.env.CORS_ORIGIN || "*",
+
+const allowlist = (process.env.CORS_ORIGINS || process.env.CORS_ORIGIN || "*")
+  .split(",")
+  .map(s => s.trim())
+  .filter(Boolean);
+
+const corsOptions = {
+  origin: function (origin, callback) {
+    if (!origin) return callback(null, true); // allow non-browser clients
+    if (allowlist.includes("*") || allowlist.includes(origin)) {
+      return callback(null, true);
+    }
+    return callback(null, false);
+  },
   methods: ["GET","POST","DELETE","OPTIONS"],
-  credentials: false
-}));
+  allowedHeaders: ["Content-Type","Authorization"],
+  credentials: false,
+  optionsSuccessStatus: 204,
+  preflightContinue: false
+};
+
+app.use(cors(corsOptions));
+app.options("*", cors(corsOptions)); // enable preflight globally
 
 function getTenantId(req) {
   const b = req.body?.tenantId;
