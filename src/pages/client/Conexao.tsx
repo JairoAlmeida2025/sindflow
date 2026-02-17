@@ -273,7 +273,21 @@ export default function Conexao() {
       });
 
       let data: any = null;
-      try { data = await res.json(); } catch { }
+      try {
+        const txt = await res.text();
+        try { data = JSON.parse(txt); } catch { data = null; }
+      } catch (e) {
+        console.warn("Failed to read disconnect response", e);
+      }
+
+      if (!res.ok) {
+        console.error("Disconnect error:", res.status, data);
+        setError(`Erro no servidor: ${res.status}`);
+        // Mesmo com erro 500 do n8n, vamos permitir limpar a sessão localmente?
+        // Neste caso, se o n8n falhou, o WhatsApp pode ainda estar conectado.
+        // Melhor avisar o usuário, mas permitir limpar se ele quiser (já temos o botão "Nova Conexão" para limpar tudo).
+        return;
+      }
 
       if (Array.isArray(data) && data[0]?.mensagem) {
         setDisconnectMessage(data[0].mensagem);
