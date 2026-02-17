@@ -6,22 +6,24 @@ import http from "http";
 import { createOrGetInstance, getQr, getStatus, logout } from "./instanceManager.js";
 
 const app = express();
-app.use(express.json());
 
-// Log middleware for debugging
+// Middleware Manual de CORS (Força Bruta) - Executa antes de tudo
 app.use((req, res, next) => {
+  res.header("Access-Control-Allow-Origin", "*");
+  res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH");
+  res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization");
+  res.header("Access-Control-Allow-Credentials", "true");
+
   console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
-  console.log('Headers:', JSON.stringify(req.headers));
+
+  if (req.method === "OPTIONS") {
+    return res.status(200).end();
+  }
+
   next();
 });
 
-// Simplified CORS for troubleshooting
-app.use(cors({
-  origin: "*",
-  methods: ["GET", "POST", "DELETE", "OPTIONS", "PUT", "PATCH"],
-  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept", "Origin"],
-  credentials: false
-}));
+app.use(express.json());
 
 // Endpoint de teste de CORS e saude
 app.get("/health", (req, res) => res.json({ ok: true, timestamp: new Date() }));
@@ -98,4 +100,7 @@ wss.on("connection", (ws, req) => {
 });
 
 const PORT = process.env.PORT || 4000;
-server.listen(PORT, () => {});
+server.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+  console.log(`CORS allowed for: * (Permissive Mode)`);
+});

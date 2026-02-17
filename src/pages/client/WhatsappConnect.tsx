@@ -71,17 +71,46 @@ export default function WhatsappConnect() {
   return (
     <div style={{ maxWidth: 640, margin: "0 auto", padding: 24, display: "grid", gap: 16 }}>
       <h1>Conectar WhatsApp</h1>
-      <div style={{ border: "1px dashed #ccc", borderRadius: 8, height: 240, display: "grid", placeItems: "center" }}>
-        {qrBase64 ? <img src={qrBase64} alt="QR Code" style={{ width: 220, height: 220 }} /> : <span>QR Code</span>}
+      {status === "conectado" ? (
+        <div style={{ 
+          border: "1px solid #dcfce7", 
+          background: "#f0fdf4", 
+          borderRadius: 8, 
+          height: 240, 
+          display: "flex", 
+          flexDirection: "column", 
+          alignItems: "center", 
+          justifyContent: "center",
+          gap: 16
+        }}>
+          <div style={{ 
+            width: 64, 
+            height: 64, 
+            background: "#22c55e", 
+            borderRadius: "50%", 
+            display: "grid", 
+            placeItems: "center",
+            color: "white",
+            fontSize: 32
+          }}>
+            ✓
+          </div>
+          <div style={{ color: "#166534", fontWeight: 600, fontSize: 18 }}>WhatsApp Conectado</div>
+          <div style={{ color: "#15803d" }}>Sua integração está ativa e funcionando.</div>
+        </div>
+      ) : (
+        <>
+          <div style={{ border: "1px dashed #ccc", borderRadius: 8, height: 240, display: "grid", placeItems: "center" }}>
+            {qrBase64 ? <img src={qrBase64} alt="QR Code" style={{ width: 220, height: 220 }} /> : <span>{status === "reconectando" ? "Reconectando..." : "Carregando QR Code..."}</span>}
+          </div>
+          <p>Escaneie com seu WhatsApp</p>
+        </>
+      )}
+      <div style={{ display: "flex", gap: 8, alignItems: "center", justifyContent: "center" }}>
+        {status !== "conectado" && <button onClick={connect} disabled={loading || status === "reconectando"} className="btn-primary">Conectar</button>}
+        {status !== "conectado" && <button onClick={getQr} disabled={loading} className="btn-secondary">Atualizar QR</button>}
+        {status === "conectado" && <button onClick={disconnect} disabled={loading} className="btn-secondary" style={{ color: "#ef4444", borderColor: "#ef4444" }}>Desconectar</button>}
       </div>
-      <p>Escaneie com seu WhatsApp</p>
-      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-        <span>Status: {status}</span>
-        <button onClick={connect} disabled={loading} className="btn-primary">Conectar</button>
-        <button onClick={getQr} disabled={loading} className="btn-secondary">Atualizar QR</button>
-        <button onClick={disconnect} disabled={loading} className="btn-secondary">Desconectar</button>
-      </div>
-      {status === "conectado" && <div>WhatsApp conectado com sucesso</div>}
       {number ? (
         <div style={{ display: "flex", gap: 8 }}>
           <span>Número conectado: {number}</span>
