@@ -4,6 +4,7 @@ import { supabase } from "../../lib/supabase";
 const WEBHOOK_GERADOR = "https://editor-n8n.automacoesai.com/webhook/gerador";
 const WEBHOOK_DESCONECTAR = "https://editor-n8n.automacoesai.com/webhook/desconectar";
 const WEBHOOK_RECONECTAR = "https://editor-n8n.automacoesai.com/webhook/reconectar";
+const WEBHOOK_DELETAR = "https://editor-n8n.automacoesai.com/webhook/deletar";
 
 function normalizeConnectionName(input: string) {
   let v = String(input || "").trim().toLowerCase();
