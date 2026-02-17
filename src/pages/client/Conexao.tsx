@@ -223,11 +223,6 @@ export default function Conexao() {
         .from("whatsapp_sessions")
         .select("id")
         .eq("user_id", userId)
-      // 1. Criar/Atualizar registro no Supabase
-      const { data: existing } = await supabase
-        .from("whatsapp_sessions")
-        .select("id")
-        .eq("user_id", userId)
         .eq("session_id", finalName)
         .limit(1)
         .single();
