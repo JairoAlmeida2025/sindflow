@@ -52,6 +52,86 @@ export default function Conversations() {
   const fileDocRef = useRef<HTMLInputElement | null>(null);
   const fileStickerRef = useRef<HTMLInputElement | null>(null);
 
+  function formatTimeMMSS(totalSeconds: number) {
+    if (!Number.isFinite(totalSeconds) || totalSeconds < 0) return "00:00";
+    const s = Math.floor(totalSeconds);
+    const mm = Math.floor(s / 60);
+    const ss = s % 60;
+    return `${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")}`;
+  }
+
+  function AudioMiniPlayer({ url, fromMe }: { url: string; fromMe: boolean }) {
+    const audioRef = useRef<HTMLAudioElement | null>(null);
+    const [playing, setPlaying] = useState(false);
+    const [duration, setDuration] = useState(0);
+    const [current, setCurrent] = useState(0);
+
+    useEffect(() => {
+      const el = audioRef.current;
+      if (!el) return;
+      const onLoaded = () => setDuration(Number.isFinite(el.duration) ? el.duration : 0);
+      const onTime = () => setCurrent(el.currentTime || 0);
+      const onEnd = () => setPlaying(false);
+      el.addEventListener("loadedmetadata", onLoaded);
+      el.addEventListener("timeupdate", onTime);
+      el.addEventListener("ended", onEnd);
+      return () => {
+        el.removeEventListener("loadedmetadata", onLoaded);
+        el.removeEventListener("timeupdate", onTime);
+        el.removeEventListener("ended", onEnd);
+      };
+    }, [url]);
+
+    const pct = duration > 0 ? Math.min(1, Math.max(0, current / duration)) : 0;
+
+    const toggle = async () => {
+      const el = audioRef.current;
+      if (!el) return;
+      try {
+        if (playing) {
+          el.pause();
+          setPlaying(false);
+        } else {
+          await el.play();
+          setPlaying(true);
+        }
+      } catch {
+        setPlaying(false);
+      }
+    };
+
+    const seek = (e: React.MouseEvent<HTMLDivElement>) => {
+      const el = audioRef.current;
+      if (!el || !duration) return;
+      const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const next = Math.min(1, Math.max(0, x / rect.width)) * duration;
+      el.currentTime = next;
+      setCurrent(next);
+    };
+
+    const pillBg = fromMe ? "#d9fdd3" : "#fff";
+    const accent = "#22c55e";
+    const track = "#d1d7db";
+
+    return (
+      <div style={{ marginTop: 6, width: 280, maxWidth: "100%", display: "grid", gap: 6 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, background: pillBg, borderRadius: 12 }}>
+          <button onClick={toggle} style={{ width: 36, height: 36, borderRadius: 18, border: "none", background: accent, color: "#fff", cursor: "pointer", flex: "0 0 auto" }}>
+            {playing ? "❚❚" : "▶"}
+          </button>
+          <div onClick={seek} style={{ height: 8, flex: 1, background: track, borderRadius: 999, cursor: "pointer", position: "relative", overflow: "hidden" }}>
+            <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: `${pct * 100}%`, background: accent }} />
+          </div>
+          <div style={{ fontSize: 12, color: "#667781", width: 44, textAlign: "right", flex: "0 0 auto" }}>
+            {formatTimeMMSS(duration - current)}
+          </div>
+        </div>
+        <audio ref={audioRef} src={url} preload="metadata" style={{ display: "none" }} />
+      </div>
+    );
+  }
+
   useEffect(() => {
     (async () => {
       const { data: { user } } = await supabase.auth.getUser();
@@ -343,10 +423,14 @@ export default function Conversations() {
       const res = await fetch(`${WHATSAPP_API_URL}/whatsapp/send-text`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tenantId: tenant, jid: normalizeForSend(selectedId), text })
+        body: JSON.stringify({ tenantId: tenant, jid: normalizeJid(selectedId), text })
       });
-      
-      if (!res.ok) throw new Error("Falha ao enviar");
+
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json?.ok) {
+        console.error("Falha ao enviar:", json || res.statusText);
+        throw new Error(json?.error || "Falha ao enviar");
+      }
       
       // Atualizar conversa na lista lateral
       setChats(prevChats => {
@@ -476,7 +560,7 @@ export default function Conversations() {
       await fetch(`${WHATSAPP_API_URL}/whatsapp/send-audio`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tenantId: tenant, jid: normalizeForSend(selectedId), dataUrl, ptt: true })
+        body: JSON.stringify({ tenantId: tenant, jid: normalizeJid(selectedId), dataUrl, ptt: true })
       });
       audioSend.current?.play().catch(() => {});
       setRecording("idle");
@@ -495,7 +579,7 @@ export default function Conversations() {
     for (const f of files) {
       const url = await uploadToSupabase(f, user?.id || "anon");
       if (!url) continue;
-      const jid = normalizeForSend(selectedId);
+      const jid = normalizeJid(selectedId);
       if (f.type.startsWith("image")) {
         await fetch(`${WHATSAPP_API_URL}/whatsapp/send-image`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tenantId: tenant, jid, url }) });
       } else if (f.type.startsWith("video")) {
@@ -512,7 +596,7 @@ export default function Conversations() {
     for (const f of files) {
       const url = await uploadToSupabase(f, user?.id || "anon");
       if (!url) continue;
-      const jid = normalizeForSend(selectedId);
+      const jid = normalizeJid(selectedId);
       await fetch(`${WHATSAPP_API_URL}/whatsapp/send-document`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tenantId: tenant, jid, url, fileName: f.name, mime: f.type }) });
     }
     setAttachOpen(false);
@@ -525,7 +609,7 @@ export default function Conversations() {
     for (const f of files) {
       const url = await uploadToSupabase(f, user?.id || "anon");
       if (!url) continue;
-      const jid = normalizeForSend(selectedId);
+      const jid = normalizeJid(selectedId);
       await fetch(`${WHATSAPP_API_URL}/whatsapp/send-sticker`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tenantId: tenant, jid, url }) });
     }
     setAttachOpen(false);
@@ -537,7 +621,7 @@ export default function Conversations() {
     navigator.geolocation.getCurrentPosition(async (pos) => {
       const lat = pos.coords.latitude;
       const lng = pos.coords.longitude;
-      const jid = normalizeForSend(selectedId);
+      const jid = normalizeJid(selectedId);
       await fetch(`${WHATSAPP_API_URL}/whatsapp/send-location`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tenantId: tenant, jid, lat, lng }) });
       setAttachOpen(false);
     }, () => {});
@@ -556,7 +640,7 @@ export default function Conversations() {
     ].join("\n");
     const { data: { user } } = await supabase.auth.getUser();
     const tenant = user ? `usr-${user.id}` : "default";
-    const jid = normalizeForSend(selectedId);
+    const jid = normalizeJid(selectedId);
     await fetch(`${WHATSAPP_API_URL}/whatsapp/send-contact`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tenantId: tenant, jid, vcard, displayName: name }) });
     setAttachOpen(false);
   }
@@ -569,18 +653,6 @@ export default function Conversations() {
   }
   function extractPhone(jid: string) {
     return (jid || "").replace(/@.*$/, "");
-  }
-  function normalizePhoneDigits(input: string) {
-    let p = String(input || "");
-    p = p.replace(/[^\d]/g, "");
-    if (p.startsWith("55") && p.length >= 12 && p.charAt(2) === "0") {
-      p = "55" + p.slice(3);
-    }
-    return p;
-  }
-  function normalizeForSend(jidOrPhone: string) {
-    const phone = normalizePhoneDigits(extractPhone(jidOrPhone));
-    return `${phone}@s.whatsapp.net`;
   }
 
   function blobToDataURL(blob: Blob): Promise<string> {
@@ -805,7 +877,7 @@ export default function Conversations() {
                   const videoUrl = m.message?.videoMessage?.url;
                   const docUrl = m.message?.documentMessage?.url;
                   const docName = (m.message as any)?.documentMessage?.fileName || (docUrl ? docUrl.split("/").pop() : "");
-                  if (!text && !imageUrl && !audioUrl && !videoUrl) return null;
+                  if (!text && !imageUrl && !audioUrl && !videoUrl && !docUrl) return null;
                   return (
                     <div key={idx} style={{ display: "flex", justifyContent: fromMe ? "flex-end" : "flex-start", marginBottom: 10 }}>
                       <div style={{ 
@@ -821,7 +893,7 @@ export default function Conversations() {
                       }}>
                         {text && <div>{text}</div>}
                         {imageUrl && <img src={imageUrl} alt="" style={{ maxWidth: "100%", borderRadius: 8, marginTop: 6 }} />}
-                        {audioUrl && <audio controls src={audioUrl} style={{ width: "100%", marginTop: 6 }} />}
+                        {audioUrl && <AudioMiniPlayer url={audioUrl} fromMe={!!fromMe} />}
                         {videoUrl && <video controls src={videoUrl} style={{ width: "100%", marginTop: 6, borderRadius: 8 }} />}
                         {docUrl && (
                           <a href={docUrl} target="_blank" rel="noreferrer" style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 6, textDecoration: "none", color: "#111b21" }}>

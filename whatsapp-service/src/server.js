@@ -29,27 +29,36 @@ app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
 function normalizePhoneDigits(input) {
-  let p = String(input || "");
-  p = p.replace(/[^\d]/g, "");
-  // Remove leading zero after country code BR (55)
-  if (p.startsWith("55") && p.length >= 12 && p.charAt(2) === "0") {
-    p = "55" + p.slice(3);
-  }
-  return p;
+  return String(input || "").replace(/[^\d]/g, "");
 }
-function normalizeJidInput(jid) {
-  let norm = String(jid || "");
-  if (!norm) return norm;
-  if (norm.includes("@")) {
-    const phone = norm.replace(/@.*$/, "");
-    const fixed = normalizePhoneDigits(phone);
-    return `${fixed}@s.whatsapp.net`;
+
+function candidatePhonesFromInput(jidOrPhone) {
+  const raw = String(jidOrPhone || "");
+  const base = normalizePhoneDigits(raw.replace(/@.*$/, ""));
+  const out = [];
+  if (base) out.push(base);
+  if (base.startsWith("55") && base.length >= 12) {
+    if (base.charAt(2) === "0") {
+      out.push("55" + base.slice(3));
+    } else {
+      out.push(base.slice(0, 2) + "0" + base.slice(2));
+    }
   }
-  const fixed = normalizePhoneDigits(norm);
-  return `${fixed}@s.whatsapp.net`;
+  return Array.from(new Set(out));
 }
-function phoneFromJid(jid) {
-  return normalizePhoneDigits(String(jid || "").replace(/@.*$/, ""));
+
+async function resolveSendJid(sock, jidOrPhone) {
+  const phones = candidatePhonesFromInput(jidOrPhone);
+  for (const phone of phones) {
+    try {
+      const iswa = await sock.onWhatsApp(phone);
+      if (iswa?.[0]?.exists) {
+        return { ok: true, jid: `${phone}@s.whatsapp.net`, phone, tried: phones };
+      }
+    } catch {}
+  }
+  const phone = phones[0] || "";
+  return { ok: false, jid: phone ? `${phone}@s.whatsapp.net` : String(jidOrPhone || ""), phone, tried: phones };
 }
 
 function parseDataUrl(dataUrl) {
@@ -141,14 +150,11 @@ app.post("/whatsapp/send-text", async (req, res) => {
   const sock = await ensureInstance(tenantId);
 
   try {
-    const norm = normalizeJidInput(jid);
-    const phone = phoneFromJid(norm);
-    const iswa = await sock.onWhatsApp(phone);
-    if (!iswa?.[0]?.exists) {
-      return res.status(400).json({ ok: false, error: "number not on whatsapp", phone });
-    }
-    const sent = await sock.sendMessage(norm, { text });
-    console.log(`[whatsapp] sent text to ${norm} by tenant ${tenantId}`);
+    const resolved = await resolveSendJid(sock, jid);
+    if (!resolved.phone) return res.status(400).json({ ok: false, error: "invalid jid" });
+    if (!resolved.ok) return res.status(400).json({ ok: false, error: "number not on whatsapp", tried: resolved.tried });
+    const sent = await sock.sendMessage(resolved.jid, { text });
+    console.log(`[whatsapp] sent text to ${resolved.jid} by tenant ${tenantId} (tried=${resolved.tried.join(",")})`);
     return res.json({ ok: true, data: sent });
   } catch (err) {
     console.error("Error sending message:", err);
@@ -170,17 +176,14 @@ app.post("/whatsapp/send-audio", async (req, res) => {
     let mime = match[1] || "audio/ogg";
     const b64 = match[2];
     const buffer = Buffer.from(b64, "base64");
-    const norm = normalizeJidInput(jid);
-    const phone = phoneFromJid(norm);
-    const iswa = await sock.onWhatsApp(phone);
-    if (!iswa?.[0]?.exists) {
-      return res.status(400).json({ ok: false, error: "number not on whatsapp", phone });
-    }
+    const resolved = await resolveSendJid(sock, jid);
+    if (!resolved.phone) return res.status(400).json({ ok: false, error: "invalid jid" });
+    if (!resolved.ok) return res.status(400).json({ ok: false, error: "number not on whatsapp", tried: resolved.tried });
     if (mime === "audio/webm") {
       mime = "audio/ogg"; // força container aceito
     }
-    const sent = await sock.sendMessage(norm, { audio: buffer, mimetype: mime, ptt: true });
-    console.log(`[whatsapp] sent audio to ${norm} by tenant ${tenantId}`);
+    const sent = await sock.sendMessage(resolved.jid, { audio: buffer, mimetype: mime, ptt: true });
+    console.log(`[whatsapp] sent audio to ${resolved.jid} by tenant ${tenantId} (tried=${resolved.tried.join(",")})`);
     return res.json({ ok: true, data: sent });
   } catch (err) {
     console.error("Error sending audio:", err);
@@ -195,15 +198,13 @@ app.post("/whatsapp/send-image", async (req, res) => {
   if (!jid || (!dataUrl && !url)) return res.status(400).json({ ok: false, error: "missing jid or media source" });
   const sock = await ensureInstance(tenantId);
   try {
-    const norm = normalizeJidInput(jid);
-    const phone = phoneFromJid(norm);
-    const iswa = await sock.onWhatsApp(phone);
-    if (!iswa?.[0]?.exists) {
-      return res.status(400).json({ ok: false, error: "number not on whatsapp", phone });
-    }
+    const resolved = await resolveSendJid(sock, jid);
+    if (!resolved.phone) return res.status(400).json({ ok: false, error: "invalid jid" });
+    if (!resolved.ok) return res.status(400).json({ ok: false, error: "number not on whatsapp", tried: resolved.tried });
     const parsed = dataUrl ? parseDataUrl(dataUrl) : await getBufferFromUrl(url);
-    const sent = await sock.sendMessage(norm, { image: parsed.buffer, mimetype: parsed.mime || "image/jpeg", caption: caption || "" });
-    console.log(`[whatsapp] sent image to ${norm} by tenant ${tenantId}`);
+    const parsed = dataUrl ? parseDataUrl(dataUrl) : await getBufferFromUrl(url);
+    const sent = await sock.sendMessage(resolved.jid, { image: parsed.buffer, mimetype: parsed.mime || "image/jpeg", caption: caption || "" });
+    console.log(`[whatsapp] sent image to ${resolved.jid} by tenant ${tenantId} (tried=${resolved.tried.join(",")})`);
     return res.json({ ok: true, data: sent });
   } catch (err) {
     console.error("Error sending image:", err);
@@ -218,15 +219,12 @@ app.post("/whatsapp/send-video", async (req, res) => {
   if (!jid || (!dataUrl && !url)) return res.status(400).json({ ok: false, error: "missing jid or media source" });
   const sock = await ensureInstance(tenantId);
   try {
-    const norm = normalizeJidInput(jid);
-    const phone = phoneFromJid(norm);
-    const iswa = await sock.onWhatsApp(phone);
-    if (!iswa?.[0]?.exists) {
-      return res.status(400).json({ ok: false, error: "number not on whatsapp", phone });
-    }
+    const resolved = await resolveSendJid(sock, jid);
+    if (!resolved.phone) return res.status(400).json({ ok: false, error: "invalid jid" });
+    if (!resolved.ok) return res.status(400).json({ ok: false, error: "number not on whatsapp", tried: resolved.tried });
     const parsed = dataUrl ? parseDataUrl(dataUrl) : await getBufferFromUrl(url);
-    const sent = await sock.sendMessage(norm, { video: parsed.buffer, mimetype: parsed.mime || "video/mp4", caption: caption || "" });
-    console.log(`[whatsapp] sent video to ${norm} by tenant ${tenantId}`);
+    const sent = await sock.sendMessage(resolved.jid, { video: parsed.buffer, mimetype: parsed.mime || "video/mp4", caption: caption || "" });
+    console.log(`[whatsapp] sent video to ${resolved.jid} by tenant ${tenantId} (tried=${resolved.tried.join(",")})`);
     return res.json({ ok: true, data: sent });
   } catch (err) {
     console.error("Error sending video:", err);
@@ -241,15 +239,12 @@ app.post("/whatsapp/send-document", async (req, res) => {
   if (!jid || (!dataUrl && !url)) return res.status(400).json({ ok: false, error: "missing jid or media source" });
   const sock = await ensureInstance(tenantId);
   try {
-    const norm = normalizeJidInput(jid);
-    const phone = phoneFromJid(norm);
-    const iswa = await sock.onWhatsApp(phone);
-    if (!iswa?.[0]?.exists) {
-      return res.status(400).json({ ok: false, error: "number not on whatsapp", phone });
-    }
+    const resolved = await resolveSendJid(sock, jid);
+    if (!resolved.phone) return res.status(400).json({ ok: false, error: "invalid jid" });
+    if (!resolved.ok) return res.status(400).json({ ok: false, error: "number not on whatsapp", tried: resolved.tried });
     const parsed = dataUrl ? parseDataUrl(dataUrl) : await getBufferFromUrl(url);
-    const sent = await sock.sendMessage(norm, { document: parsed.buffer, fileName: fileName || "arquivo", mimetype: mime || parsed.mime || "application/octet-stream" });
-    console.log(`[whatsapp] sent document to ${norm} by tenant ${tenantId}`);
+    const sent = await sock.sendMessage(resolved.jid, { document: parsed.buffer, fileName: fileName || "arquivo", mimetype: mime || parsed.mime || "application/octet-stream" });
+    console.log(`[whatsapp] sent document to ${resolved.jid} by tenant ${tenantId} (tried=${resolved.tried.join(",")})`);
     return res.json({ ok: true, data: sent });
   } catch (err) {
     console.error("Error sending document:", err);
@@ -264,15 +259,12 @@ app.post("/whatsapp/send-sticker", async (req, res) => {
   if (!jid || (!dataUrl && !url)) return res.status(400).json({ ok: false, error: "missing jid or media source" });
   const sock = await ensureInstance(tenantId);
   try {
-    const norm = normalizeJidInput(jid);
-    const phone = phoneFromJid(norm);
-    const iswa = await sock.onWhatsApp(phone);
-    if (!iswa?.[0]?.exists) {
-      return res.status(400).json({ ok: false, error: "number not on whatsapp", phone });
-    }
+    const resolved = await resolveSendJid(sock, jid);
+    if (!resolved.phone) return res.status(400).json({ ok: false, error: "invalid jid" });
+    if (!resolved.ok) return res.status(400).json({ ok: false, error: "number not on whatsapp", tried: resolved.tried });
     const parsed = dataUrl ? parseDataUrl(dataUrl) : await getBufferFromUrl(url);
-    const sent = await sock.sendMessage(norm, { sticker: parsed.buffer });
-    console.log(`[whatsapp] sent sticker to ${norm} by tenant ${tenantId}`);
+    const sent = await sock.sendMessage(resolved.jid, { sticker: parsed.buffer });
+    console.log(`[whatsapp] sent sticker to ${resolved.jid} by tenant ${tenantId} (tried=${resolved.tried.join(",")})`);
     return res.json({ ok: true, data: sent });
   } catch (err) {
     console.error("Error sending sticker:", err);
@@ -287,14 +279,11 @@ app.post("/whatsapp/send-location", async (req, res) => {
   if (!jid || typeof lat !== "number" || typeof lng !== "number") return res.status(400).json({ ok: false, error: "missing jid or coordinates" });
   const sock = await ensureInstance(tenantId);
   try {
-    const norm = normalizeJidInput(jid);
-    const phone = phoneFromJid(norm);
-    const iswa = await sock.onWhatsApp(phone);
-    if (!iswa?.[0]?.exists) {
-      return res.status(400).json({ ok: false, error: "number not on whatsapp", phone });
-    }
-    const sent = await sock.sendMessage(norm, { location: { degreesLatitude: lat, degreesLongitude: lng, name, address } });
-    console.log(`[whatsapp] sent location to ${norm} by tenant ${tenantId}`);
+    const resolved = await resolveSendJid(sock, jid);
+    if (!resolved.phone) return res.status(400).json({ ok: false, error: "invalid jid" });
+    if (!resolved.ok) return res.status(400).json({ ok: false, error: "number not on whatsapp", tried: resolved.tried });
+    const sent = await sock.sendMessage(resolved.jid, { location: { degreesLatitude: lat, degreesLongitude: lng, name, address } });
+    console.log(`[whatsapp] sent location to ${resolved.jid} by tenant ${tenantId} (tried=${resolved.tried.join(",")})`);
     return res.json({ ok: true, data: sent });
   } catch (err) {
     console.error("Error sending location:", err);
@@ -309,14 +298,11 @@ app.post("/whatsapp/send-contact", async (req, res) => {
   if (!jid || !vcard) return res.status(400).json({ ok: false, error: "missing jid or vcard" });
   const sock = await ensureInstance(tenantId);
   try {
-    const norm = normalizeJidInput(jid);
-    const phone = phoneFromJid(norm);
-    const iswa = await sock.onWhatsApp(phone);
-    if (!iswa?.[0]?.exists) {
-      return res.status(400).json({ ok: false, error: "number not on whatsapp", phone });
-    }
-    const sent = await sock.sendMessage(norm, { contacts: { displayName: displayName || "Contato", contacts: [{ vcard }] } });
-    console.log(`[whatsapp] sent contact to ${norm} by tenant ${tenantId}`);
+    const resolved = await resolveSendJid(sock, jid);
+    if (!resolved.phone) return res.status(400).json({ ok: false, error: "invalid jid" });
+    if (!resolved.ok) return res.status(400).json({ ok: false, error: "number not on whatsapp", tried: resolved.tried });
+    const sent = await sock.sendMessage(resolved.jid, { contacts: { displayName: displayName || "Contato", contacts: [{ vcard }] } });
+    console.log(`[whatsapp] sent contact to ${resolved.jid} by tenant ${tenantId} (tried=${resolved.tried.join(",")})`);
     return res.json({ ok: true, data: sent });
   } catch (err) {
     console.error("Error sending contact:", err);
