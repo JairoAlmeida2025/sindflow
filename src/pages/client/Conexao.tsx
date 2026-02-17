@@ -106,7 +106,24 @@ export default function Conexao() {
 
     setLoading(true);
     try {
-      // Deletar todas as sessões deste usuário para garantir a regra de 1 por perfil
+      // 1. Chamar Webhook para deletar na Evolution/Backend
+      if (activeSessionId) {
+        try {
+          await fetch(WEBHOOK_DELETAR, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              connectionName: activeSessionId,
+              userId: userId
+            })
+          });
+        } catch (err) {
+          console.error("Erro ao chamar webhook de deletar:", err);
+          // Não vamos travar se o webhook falhar, pois o usuario quer limpar de qualquer jeito
+        }
+      }
+
+      // 2. Deletar todas as sessões deste usuário localmente
       await supabase
         .from("whatsapp_sessions")
         .delete()
