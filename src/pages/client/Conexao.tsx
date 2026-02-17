@@ -53,22 +53,18 @@ export default function Conexao() {
       if (user) {
         setUserId(user.id);
 
-        // Buscar última sessão ativa ou gerando QR
+        // Buscar última sessão (qualquer status)
         const { data: session } = await supabase
           .from("whatsapp_sessions")
           .select("session_id, status")
           .eq("user_id", user.id)
-          .neq("status", "closed") // Tudo que não for closed (open, connected, qrcode_generating)
-          .order("updated_at", { ascending: false }) // Pegar o mais recente
+          .order("updated_at", { ascending: false })
           .limit(1)
           .single();
 
         if (session) {
           setActiveSessionId(session.session_id);
           setStatus(session.status);
-          // Se status for qrcode_generating, o QR pode ter expirado ou precisa ser gerado de novo?
-          // O realtime vai atualizar se mudar. Se travar, o usuário pode clicar em "Limpar".
-          // Se for 'open', já mostra conectado.
         }
       }
     }
@@ -103,6 +99,33 @@ export default function Conexao() {
     };
   }, [activeSessionId]);
 
+  // Função para deletar sessão anterior e iniciar nova
+  async function handleForceNewConnection() {
+    if (!userId) return;
+    if (!confirm("Isso excluirá a conexão anterior permanentemente. Deseja continuar?")) return;
+
+    setLoading(true);
+    try {
+      // Deletar todas as sessões deste usuário para garantir a regra de 1 por perfil
+      await supabase
+        .from("whatsapp_sessions")
+        .delete()
+        .eq("user_id", userId);
+
+      setConnectionName("");
+      setQrDataUrl(null);
+      setError(null);
+      setStatus(null);
+      setActiveSessionId(null);
+      setDisconnectMessage(null);
+    } catch (e) {
+      console.error(e);
+      setError("Erro ao limpar sessão antiga.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
   // Se o status for 'open' ou 'connected', garantimos que o QR some
   const isConnected = status === "open" || status === "connected";
 
@@ -122,7 +145,6 @@ export default function Conexao() {
 
     try {
       // 0. Gerar Nome Sequencial
-      // Buscar sessões que começam com o nome base para encontrar o próximo índice
       let finalName = `${normalizedInput}_001`; // Padrão
 
       const { data: similarSessions } = await supabase
@@ -132,7 +154,6 @@ export default function Conexao() {
         .ilike("session_id", `${normalizedInput}_%`);
 
       if (similarSessions && similarSessions.length > 0) {
-        // Extrair sufixos e encontrar o maior
         const suffixes = similarSessions.map(s => {
           const parts = s.session_id?.split("_");
           const last = parts ? parts[parts.length - 1] : "0";
@@ -251,8 +272,6 @@ export default function Conexao() {
         body: JSON.stringify(payload)
       });
 
-      // Tentar ler a resposta para pegar a mensagem "Desconectado com sucesso"
-      // Exemplo resposta: [{"session_id": "...", "status": "close", "mensagem": "Desconectado com sucesso"}]
       let data: any = null;
       try { data = await res.json(); } catch { }
 
@@ -287,15 +306,14 @@ export default function Conexao() {
 
   async function handleReconnect() {
     if (!userId || !activeSessionId) return;
-    // Lógica similar ao submit, mas chamando reconectar e mantendo o ID
     setLoading(true);
     setError(null);
     setQrDataUrl(null);
     setDisconnectMessage(null);
-    setStatus("reconnecting"); // Estado transitorio
+    setStatus("reconnecting");
 
     try {
-      // Atualizar status no banco para indicar tentativa
+      // Atualizar status no banco
       const { data: existing } = await supabase
         .from("whatsapp_sessions")
         .select("id")
@@ -319,7 +337,6 @@ export default function Conexao() {
         })
       });
 
-      // Processar retorno (QR Code esperado)
       const ct = res.headers.get("content-type") || "";
       let payload: any = null;
       if (ct.includes("application/json")) {
@@ -336,9 +353,8 @@ export default function Conexao() {
         return;
       }
 
-      // Extrair QR (mesma lógica do submit)
       const qr = Array.isArray(payload) ? (payload[0]?.qrcode || payload[0]?.base64) : (payload?.qrcode || payload?.base64);
-      const dataUrl = typeof payload === "string" && !qr ? null : buildQrDataUrl(payload); // Se payload for string direta?
+      const dataUrl = typeof payload === "string" && !qr ? null : buildQrDataUrl(payload);
 
       let finalQr = null;
       if (qr && typeof qr === "string") {
@@ -346,7 +362,6 @@ export default function Conexao() {
       } else if (dataUrl) {
         finalQr = dataUrl;
       } else if (typeof payload === "string" && payload.trim()) {
-        // as vezes retorna string direta
         const s = payload.trim();
         if (s.startsWith("data:image/")) finalQr = s;
         else finalQr = `data:image/png;base64,${s}`;
@@ -356,8 +371,6 @@ export default function Conexao() {
         setQrDataUrl(finalQr);
         setStatus("qrcode_generated");
       } else {
-        // Se não veio QR, talvez já conectou direto? 
-        // Vamos assumir que se não veio erro, e não veio QR, pode ser que precise esperar realtime.
         setError("Não foi possível obter o QR Code de reconexão. Verifique o status.");
       }
 
@@ -414,7 +427,7 @@ export default function Conexao() {
 
             <div style={{ display: "flex", gap: 10 }}>
               {!activeSessionId ? (
-                // Modo Nova Conexão
+                // Modo Nova Conexão (Sem sessão anterior)
                 <>
                   <button
                     onClick={submit}
@@ -442,9 +455,7 @@ export default function Conexao() {
                   {loading ? "Desconectando..." : "Desconectar Instância"}
                 </button>
               ) : (
-                // Modo Desconectado ou QR Gerado (com Session ID Ativo)
-                // Se status for 'closed', mostrar Reconectar e Limpar
-                // Se status for 'qrcode_generating' ou 'qrcode_generated', mostrar Limpar (ele já vê o QR)
+                // Modo Desconectado ou QR Gerado
                 <>
                   {status === 'closed' && (
                     <button
@@ -457,9 +468,9 @@ export default function Conexao() {
                   )}
 
                   <button
-                    onClick={() => { setConnectionName(""); setQrDataUrl(null); setError(null); setStatus(null); setActiveSessionId(null); setDisconnectMessage(null); }}
+                    onClick={handleForceNewConnection}
                     disabled={loading}
-                    style={{ padding: "10px 14px", borderRadius: 10, background: "#e9edef", color: "#111b21", border: "none", cursor: "pointer" }}
+                    style={{ padding: "10px 14px", borderRadius: 10, background: "#e9edef", color: "#111b21", border: "none", cursor: "pointer", marginLeft: status === 'closed' ? 0 : 'auto' }}
                   >
                     Nova Conexão
                   </button>
