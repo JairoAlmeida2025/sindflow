@@ -4,7 +4,9 @@ import QRCode from "qrcode";
 import fs from "fs";
 import path from "path";
 
-const sessionsDir = path.resolve(process.cwd(), "whatsapp-service", "sessions");
+const sessionsDir = process.env.WHATSAPP_SESSIONS_DIR
+  ? path.resolve(process.env.WHATSAPP_SESSIONS_DIR)
+  : path.resolve(process.cwd(), "whatsapp-service", "sessions");
 if (!fs.existsSync(sessionsDir)) fs.mkdirSync(sessionsDir, { recursive: true });
 
 const instances = new Map();

@@ -83,7 +83,7 @@ export default function MasterWhatsapp() {
       <div style={{ display: "grid", gridTemplateColumns: "320px 1fr", gap: 24 }}>
         <div style={{ background: "white", border: "1px solid #eee", borderRadius: 12, padding: 16, display: "flex", alignItems: "center", justifyContent: "center" }}>
           {qrBase64 ? (
-            <img src={`data:image/png;base64,${qrBase64}`} alt="QR Code" style={{ width: 280, height: 280 }} />
+            <img src={qrBase64} alt="QR Code" style={{ width: 280, height: 280 }} />
           ) : (
             <div style={{ color: "#666" }}>{loading ? "Carregando QR..." : "QR indisponível"}</div>
           )}

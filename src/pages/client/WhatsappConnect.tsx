@@ -32,7 +32,8 @@ export default function WhatsappConnect() {
       const name = instanceName || `usr-${(await supabase.auth.getUser()).data.user?.id}`;
       const res = await fetch(`${WHATSAPP_API_URL}/whatsapp/qrcode?tenantId=${encodeURIComponent(name)}`);
       const json = await res.json();
-      setQrBase64(json.qr || null);
+      const val = json.qr || null;
+      setQrBase64(val ? (val.startsWith("data:") ? val : `data:image/png;base64,${val}`) : null);
       setStatus(json.status === "connected" ? "conectado" : json.status === "qr_required" ? "reconectando" : "desconectado");
     } finally {
       setLoading(false);
@@ -57,6 +58,7 @@ export default function WhatsappConnect() {
   }
 
   useEffect(() => {
+    connect();
     const id = setInterval(async () => {
       const name = instanceName || `usr-${(await supabase.auth.getUser()).data.user?.id}`;
       const res = await fetch(`${WHATSAPP_API_URL}/whatsapp/status?tenantId=${encodeURIComponent(name)}`);
@@ -70,7 +72,7 @@ export default function WhatsappConnect() {
     <div style={{ maxWidth: 640, margin: "0 auto", padding: 24, display: "grid", gap: 16 }}>
       <h1>Conectar WhatsApp</h1>
       <div style={{ border: "1px dashed #ccc", borderRadius: 8, height: 240, display: "grid", placeItems: "center" }}>
-        {qrBase64 ? <img src={`data:image/png;base64,${qrBase64}`} alt="QR Code" style={{ width: 220, height: 220 }} /> : <span>QR Code</span>}
+        {qrBase64 ? <img src={qrBase64} alt="QR Code" style={{ width: 220, height: 220 }} /> : <span>QR Code</span>}
       </div>
       <p>Escaneie com seu WhatsApp</p>
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>

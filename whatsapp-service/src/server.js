@@ -1,4 +1,5 @@
 import express from "express";
+import cors from "cors";
 import jwt from "jsonwebtoken";
 import { WebSocketServer } from "ws";
 import http from "http";
@@ -6,6 +7,11 @@ import { createOrGetInstance, getQr, getStatus, logout } from "./instanceManager
 
 const app = express();
 app.use(express.json());
+app.use(cors({
+  origin: process.env.CORS_ORIGIN || "*",
+  methods: ["GET","POST","DELETE","OPTIONS"],
+  credentials: false
+}));
 
 function getTenantId(req) {
   const b = req.body?.tenantId;
