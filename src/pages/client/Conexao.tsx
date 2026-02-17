@@ -102,11 +102,20 @@ export default function Conexao() {
 
   // Função para deletar sessão anterior e iniciar nova
   async function handleForceNewConnection() {
-    if (!userId) return;
-    if (!confirm("Isso excluirá a conexão anterior permanentemente. Deseja continuar?")) return;
+    console.log("handleForceNewConnection: Start. UserId:", userId, "SessionId:", activeSessionId);
+    if (!userId) {
+      console.error("handleForceNewConnection: Missing userId");
+      return;
+    }
+
+    if (!confirm("Isso excluirá a conexão anterior permanentemente. Deseja continuar?")) {
+      console.log("handleForceNewConnection: Cancelled by user");
+      return;
+    }
 
     setLoading(true);
     try {
+      console.log("handleForceNewConnection: Deleting remote session...");
       // 1. Chamar Webhook para deletar na Evolution/Backend
       if (activeSessionId) {
         const res = await fetch(WEBHOOK_DELETAR, {
@@ -118,22 +127,25 @@ export default function Conexao() {
           })
         });
 
+        console.log("handleForceNewConnection: Webhook response status:", res.status);
+
         if (!res.ok) {
           // Se falhar na Evolution, NÃO deletamos localmente para evitar inconsistência
           const txt = await res.text();
           console.error("Falha ao deletar na Evolution:", res.status, txt);
           throw new Error(`Falha ao deletar instância remota (${res.status}). Tente novamente.`);
         }
-
-        // Opcional: Verificar mensagem de sucesso se necessário, mas res.ok já garante que a requisição foi
+        console.log("handleForceNewConnection: Remote delete successful.");
       }
 
       // 2. Deletar todas as sessões deste usuário localmente SOMENTE SE o webhook passou
+      console.log("handleForceNewConnection: Deleting local session...");
       await supabase
         .from("whatsapp_sessions")
         .delete()
         .eq("user_id", userId);
 
+      console.log("handleForceNewConnection: Local delete successful. Resetting state.");
       setConnectionName("");
       setQrDataUrl(null);
       setError(null);
@@ -141,7 +153,7 @@ export default function Conexao() {
       setActiveSessionId(null);
       setDisconnectMessage(null);
     } catch (e: any) {
-      console.error(e);
+      console.error("handleForceNewConnection: Error caught:", e);
       setError(e.message || "Erro ao limpar sessão antiga.");
     } finally {
       setLoading(false);
