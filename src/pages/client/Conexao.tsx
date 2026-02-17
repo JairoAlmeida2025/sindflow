@@ -282,11 +282,23 @@ export default function Conexao() {
 
       if (!res.ok) {
         console.error("Disconnect error:", res.status, data);
-        setError(`Erro no servidor: ${res.status}`);
-        // Mesmo com erro 500 do n8n, vamos permitir limpar a sessão localmente?
-        // Neste caso, se o n8n falhou, o WhatsApp pode ainda estar conectado.
-        // Melhor avisar o usuário, mas permitir limpar se ele quiser (já temos o botão "Nova Conexão" para limpar tudo).
-        return;
+
+        // Se deu erro no n8n, verificamos se o status no banco já mudou para 'closed'
+        const { data: currentSession } = await supabase
+          .from("whatsapp_sessions")
+          .select("status")
+          .eq("user_id", userId)
+          .eq("session_id", activeSessionId)
+          .single();
+
+        if (currentSession && ['closed', 'close', 'disconnected'].includes(currentSession.status)) {
+          // O n8n processou, mas retornou erro (ex: 500). Porém o banco está atualizado.
+          // Podemos considerar desconectado.
+        } else {
+          // Realmente falhou
+          setError(`Erro no servidor: ${res.status}`);
+          return;
+        }
       }
 
       if (Array.isArray(data) && data[0]?.mensagem) {
