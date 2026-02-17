@@ -10,9 +10,16 @@ import fs from "fs";
 import path from "path";
 import { saveMessage, normalizeJidFromMessage, updateContactAvatar } from "./supabase.js";
 
-const sessionsDir = process.env.WHATSAPP_SESSIONS_DIR
+let sessionsDir = process.env.WHATSAPP_SESSIONS_DIR
   ? path.resolve(process.env.WHATSAPP_SESSIONS_DIR)
-  : path.resolve(process.cwd(), "whatsapp-service", "sessions");
+  : "/data/sessions";
+try {
+  if (!fs.existsSync("/data")) {
+    sessionsDir = path.resolve(process.cwd(), "whatsapp-service", "sessions");
+  }
+} catch {
+  sessionsDir = path.resolve(process.cwd(), "whatsapp-service", "sessions");
+}
 if (!fs.existsSync(sessionsDir)) fs.mkdirSync(sessionsDir, { recursive: true });
 
 const instances = new Map();

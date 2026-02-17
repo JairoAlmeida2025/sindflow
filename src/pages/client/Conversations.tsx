@@ -138,7 +138,8 @@ export default function Conversations() {
       }
 
       const tenant = user ? `usr-${user.id}` : "default";
-      const ws = new WebSocket(`${WHATSAPP_API_URL.replace("http", "ws")}/ws?tenantId=${encodeURIComponent(tenant)}`);
+      const wsUrl = `${WHATSAPP_API_URL.replace("http", "ws")}/ws?tenantId=${encodeURIComponent(tenant)}`;
+      let ws = new WebSocket(wsUrl);
       ws.onmessage = (ev) => {
         try {
           const msg = JSON.parse(ev.data);
@@ -300,6 +301,17 @@ export default function Conversations() {
             }));
           }
         } catch {}
+      };
+      ws.onclose = () => {
+        // tenta reconectar com backoff simples
+        setTimeout(() => {
+          try {
+            const w = new WebSocket(wsUrl);
+            w.onmessage = ws.onmessage!;
+            w.onclose = ws.onclose!;
+            wsRef.current = w;
+          } catch {}
+        }, 1500);
       };
       wsRef.current = ws;
     })();
@@ -481,11 +493,12 @@ export default function Conversations() {
     const { data: { user } } = await supabase.auth.getUser();
     const tenant = user ? `usr-${user.id}` : "default";
     for (const f of files) {
-      const dataUrl = await fileToDataURL(f);
+      const url = await uploadToSupabase(f, user?.id || "anon");
+      if (!url) continue;
       if (f.type.startsWith("image")) {
-        await fetch(`${WHATSAPP_API_URL}/whatsapp/send-image`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tenantId: tenant, jid: selectedId, dataUrl }) });
+        await fetch(`${WHATSAPP_API_URL}/whatsapp/send-image`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tenantId: tenant, jid: selectedId, url }) });
       } else if (f.type.startsWith("video")) {
-        await fetch(`${WHATSAPP_API_URL}/whatsapp/send-video`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tenantId: tenant, jid: selectedId, dataUrl }) });
+        await fetch(`${WHATSAPP_API_URL}/whatsapp/send-video`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tenantId: tenant, jid: selectedId, url }) });
       }
     }
     setAttachOpen(false);
@@ -496,8 +509,9 @@ export default function Conversations() {
     const { data: { user } } = await supabase.auth.getUser();
     const tenant = user ? `usr-${user.id}` : "default";
     for (const f of files) {
-      const dataUrl = await fileToDataURL(f);
-      await fetch(`${WHATSAPP_API_URL}/whatsapp/send-document`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tenantId: tenant, jid: selectedId, dataUrl, fileName: f.name, mime: f.type }) });
+      const url = await uploadToSupabase(f, user?.id || "anon");
+      if (!url) continue;
+      await fetch(`${WHATSAPP_API_URL}/whatsapp/send-document`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tenantId: tenant, jid: selectedId, url, fileName: f.name, mime: f.type }) });
     }
     setAttachOpen(false);
   }
@@ -507,8 +521,9 @@ export default function Conversations() {
     const { data: { user } } = await supabase.auth.getUser();
     const tenant = user ? `usr-${user.id}` : "default";
     for (const f of files) {
-      const dataUrl = await fileToDataURL(f);
-      await fetch(`${WHATSAPP_API_URL}/whatsapp/send-sticker`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tenantId: tenant, jid: selectedId, dataUrl }) });
+      const url = await uploadToSupabase(f, user?.id || "anon");
+      if (!url) continue;
+      await fetch(`${WHATSAPP_API_URL}/whatsapp/send-sticker`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tenantId: tenant, jid: selectedId, url }) });
     }
     setAttachOpen(false);
   }
@@ -566,6 +581,24 @@ export default function Conversations() {
       reader.onerror = reject;
       reader.readAsDataURL(file);
     });
+  }
+  async function uploadToSupabase(file: File, userId: string): Promise<string | null> {
+    try {
+      const nameSafe = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+      const path = `${userId}/uploads/${Date.now()}_${nameSafe}`;
+      const { data, error } = await supabase.storage
+        .from("chat-media")
+        .upload(path, file, { upsert: true, contentType: file.type || "application/octet-stream" });
+      if (error) {
+        console.error("Upload falhou:", error.message);
+        return null;
+      }
+      const { data: pub } = supabase.storage.from("chat-media").getPublicUrl(path);
+      return pub?.publicUrl || null;
+    } catch (err) {
+      console.error("Falha upload Supabase:", err);
+      return null;
+    }
   }
 
   useEffect(() => {
