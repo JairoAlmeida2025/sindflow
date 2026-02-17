@@ -25,7 +25,8 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use(express.json());
+app.use(express.json({ limit: "50mb" }));
+app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
 function normalizeJidInput(jid) {
   let norm = String(jid || "");
@@ -117,7 +118,9 @@ app.post("/whatsapp/send-text", async (req, res) => {
   if (!sock) return res.status(404).json({ ok: false, error: "instance not found" });
 
   try {
-    const sent = await sock.sendMessage(normalizeJidInput(jid), { text });
+    const norm = normalizeJidInput(jid);
+    const sent = await sock.sendMessage(norm, { text });
+    wsNotify(tenantId, { type: "messages", payload: { messages: [sent] } });
     return res.json({ ok: true, data: sent });
   } catch (err) {
     console.error("Error sending message:", err);
@@ -145,6 +148,7 @@ app.post("/whatsapp/send-audio", async (req, res) => {
       mime = "audio/ogg"; // força container aceito
     }
     const sent = await sock.sendMessage(norm, { audio: buffer, mimetype: mime, ptt: true });
+    wsNotify(tenantId, { type: "messages", payload: { messages: [sent] } });
     return res.json({ ok: true, data: sent });
   } catch (err) {
     console.error("Error sending audio:", err);
@@ -163,6 +167,7 @@ app.post("/whatsapp/send-image", async (req, res) => {
     const norm = normalizeJidInput(jid);
     const parsed = dataUrl ? parseDataUrl(dataUrl) : await getBufferFromUrl(url);
     const sent = await sock.sendMessage(norm, { image: parsed.buffer, mimetype: parsed.mime || "image/jpeg", caption: caption || "" });
+    wsNotify(tenantId, { type: "messages", payload: { messages: [sent] } });
     return res.json({ ok: true, data: sent });
   } catch (err) {
     console.error("Error sending image:", err);
@@ -181,6 +186,7 @@ app.post("/whatsapp/send-video", async (req, res) => {
     const norm = normalizeJidInput(jid);
     const parsed = dataUrl ? parseDataUrl(dataUrl) : await getBufferFromUrl(url);
     const sent = await sock.sendMessage(norm, { video: parsed.buffer, mimetype: parsed.mime || "video/mp4", caption: caption || "" });
+    wsNotify(tenantId, { type: "messages", payload: { messages: [sent] } });
     return res.json({ ok: true, data: sent });
   } catch (err) {
     console.error("Error sending video:", err);
@@ -199,6 +205,7 @@ app.post("/whatsapp/send-document", async (req, res) => {
     const norm = normalizeJidInput(jid);
     const parsed = dataUrl ? parseDataUrl(dataUrl) : await getBufferFromUrl(url);
     const sent = await sock.sendMessage(norm, { document: parsed.buffer, fileName: fileName || "arquivo", mimetype: mime || parsed.mime || "application/octet-stream" });
+    wsNotify(tenantId, { type: "messages", payload: { messages: [sent] } });
     return res.json({ ok: true, data: sent });
   } catch (err) {
     console.error("Error sending document:", err);
@@ -217,6 +224,7 @@ app.post("/whatsapp/send-sticker", async (req, res) => {
     const norm = normalizeJidInput(jid);
     const parsed = dataUrl ? parseDataUrl(dataUrl) : await getBufferFromUrl(url);
     const sent = await sock.sendMessage(norm, { sticker: parsed.buffer });
+    wsNotify(tenantId, { type: "messages", payload: { messages: [sent] } });
     return res.json({ ok: true, data: sent });
   } catch (err) {
     console.error("Error sending sticker:", err);
@@ -234,6 +242,7 @@ app.post("/whatsapp/send-location", async (req, res) => {
   try {
     const norm = normalizeJidInput(jid);
     const sent = await sock.sendMessage(norm, { location: { degreesLatitude: lat, degreesLongitude: lng, name, address } });
+    wsNotify(tenantId, { type: "messages", payload: { messages: [sent] } });
     return res.json({ ok: true, data: sent });
   } catch (err) {
     console.error("Error sending location:", err);
@@ -251,6 +260,7 @@ app.post("/whatsapp/send-contact", async (req, res) => {
   try {
     const norm = normalizeJidInput(jid);
     const sent = await sock.sendMessage(norm, { contacts: { displayName: displayName || "Contato", contacts: [{ vcard }] } });
+    wsNotify(tenantId, { type: "messages", payload: { messages: [sent] } });
     return res.json({ ok: true, data: sent });
   } catch (err) {
     console.error("Error sending contact:", err);
