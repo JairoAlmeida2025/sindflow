@@ -100,66 +100,27 @@ export default function Conexao() {
     };
   }, [activeSessionId]);
 
-  // Função para deletar sessão anterior e iniciar nova
+  // Função para deletar sessão anterior e permitir nova
   async function handleForceNewConnection() {
-    console.log("handleForceNewConnection: Start. UserId:", userId, "SessionId:", activeSessionId);
-    if (!userId) {
-      console.error("handleForceNewConnection: Missing userId");
-      return;
-    }
-
-    // Alerta direto para o usuário (debugging robusto)
-    window.alert("Iniciando exclusão de conexão...");
+    if (!userId || !activeSessionId) return;
 
     if (!confirm("Isso excluirá a conexão anterior permanentemente. Deseja continuar?")) {
-      console.log("handleForceNewConnection: Cancelled by user");
       return;
     }
 
     setLoading(true);
     try {
-      console.log("handleForceNewConnection: Deleting remote session...");
-      // 1. Chamar Webhook para deletar na Evolution/Backend
-      if (activeSessionId) {
-        const res = await fetch(WEBHOOK_DELETAR, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            connectionName: activeSessionId,
-            userId: userId
-          })
-        });
+      console.log("handleForceNewConnection: Deleting session from database...");
 
-        console.log("handleForceNewConnection: Webhook response status:", res.status);
-
-        // ... (rest of logic same) ...
-        const ct = res.headers.get("content-type") || "";
-        let payload: any = null;
-        if (ct.includes("application/json")) {
-          try { payload = await res.json(); } catch {
-            const txt = await res.text(); try { payload = JSON.parse(txt); } catch { payload = txt; }
-          }
-        } else {
-          const txt = await res.text();
-          try { payload = JSON.parse(txt); } catch { payload = txt; }
-        }
-
-        if (!res.ok) {
-          const txt = await res.text();
-          console.error("Falha ao deletar na Evolution:", res.status, txt);
-          throw new Error(`Falha ao deletar instância remota (${res.status}). Tente novamente.`);
-        }
-        console.log("handleForceNewConnection: Remote delete successful.");
-      }
-
-      // 2. Deletar todas as sessões deste usuário localmente
-      console.log("handleForceNewConnection: Deleting local session...");
+      // Deletar todas as sessões deste usuário localmente
       await supabase
         .from("whatsapp_sessions")
         .delete()
         .eq("user_id", userId);
 
-      console.log("handleForceNewConnection: Local delete successful. Resetting state.");
+      console.log("handleForceNewConnection: Session deleted. Resetting state.");
+
+      // Resetar estado para permitir nova conexão
       setConnectionName("");
       setQrDataUrl(null);
       setError(null);
@@ -167,11 +128,10 @@ export default function Conexao() {
       setActiveSessionId(null);
       setDisconnectMessage(null);
     } catch (e: any) {
-      console.error("handleForceNewConnection: Error caught:", e);
+      console.error("handleForceNewConnection: Error:", e);
       setError(e.message || "Erro ao limpar sessão antiga.");
     } finally {
       setLoading(false);
-      window.alert("Conexão excluída com sucesso."); // Confirmação visual
     }
   }
 
@@ -240,12 +200,23 @@ export default function Conexao() {
         });
       }
 
-      // 2. Chamar Webhook n8n
-      const res = await fetch(WEBHOOK_GERADOR, {
+      // 2. Verificar se usuário tem sessões antigas (para decidir qual webhook chamar)
+      const { data: allUserSessions } = await supabase
+        .from("whatsapp_sessions")
+        .select("session_id")
+        .eq("user_id", userId);
+
+      const hasOldSessions = allUserSessions && allUserSessions.length > 1; // Mais de 1 = tem sessão antiga além da nova
+
+      // 3. Chamar Webhook apropriado
+      const webhookUrl = hasOldSessions ? WEBHOOK_DELETAR : WEBHOOK_GERADOR;
+      console.log(`Calling webhook: ${hasOldSessions ? 'DELETAR' : 'GERADOR'} for ${finalName}`);
+
+      const res = await fetch(webhookUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          connectionName: finalName, // Enviar o nome gerado
+          connectionName: finalName,
           userId: userId
         })
       });
