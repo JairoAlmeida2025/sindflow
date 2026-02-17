@@ -3,7 +3,7 @@ import cors from "cors";
 import jwt from "jsonwebtoken";
 import { WebSocketServer } from "ws";
 import http from "http";
-import { createOrGetInstance, getQr, getStatus, logout } from "./instanceManager.js";
+import { createOrGetInstance, getQr, getStatus, logout, getInstance, getProfilePic } from "./instanceManager.js";
 
 const app = express();
 
@@ -14,7 +14,9 @@ app.use((req, res, next) => {
   res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization");
   res.header("Access-Control-Allow-Credentials", "true");
 
-  console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+  if (req.method !== "OPTIONS") {
+    console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+  }
 
   if (req.method === "OPTIONS") {
     return res.status(200).end();
@@ -75,6 +77,34 @@ app.get("/whatsapp/status", async (req, res) => {
   const tenantId = String(req.query.tenantId || "");
   if (!tenantId) return res.status(400).json({ ok: false, error: "missing tenantId" });
   return res.json({ ok: true, status: getStatus(tenantId) });
+});
+
+app.post("/whatsapp/send-text", async (req, res) => {
+  const tenantId = getTenantId(req);
+  if (!tenantId) return res.status(400).json({ ok: false, error: "missing tenantId" });
+  
+  const { jid, text } = req.body;
+  if (!jid || !text) return res.status(400).json({ ok: false, error: "missing jid or text" });
+
+  const sock = getInstance(tenantId);
+  if (!sock) return res.status(404).json({ ok: false, error: "instance not found" });
+
+  try {
+    const sent = await sock.sendMessage(jid, { text });
+    return res.json({ ok: true, data: sent });
+  } catch (err) {
+    console.error("Error sending message:", err);
+    return res.status(500).json({ ok: false, error: "failed to send" });
+  }
+});
+
+app.get("/whatsapp/profile-pic", async (req, res) => {
+  const tenantId = String(req.query.tenantId || "");
+  const jid = String(req.query.jid || "");
+  if (!tenantId || !jid) return res.status(400).json({ ok: false, error: "missing params" });
+  
+  const url = await getProfilePic(tenantId, jid);
+  return res.json({ ok: true, url });
 });
 
 app.post("/whatsapp/logout", async (req, res) => {

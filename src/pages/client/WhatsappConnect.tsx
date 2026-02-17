@@ -20,6 +20,8 @@ export default function WhatsappConnect() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ tenantId: name })
       });
+      // Esperar um pouco para dar tempo de gerar o QR
+      await new Promise(r => setTimeout(r, 2000));
       await getQr();
     } finally {
       setLoading(false);
@@ -34,7 +36,14 @@ export default function WhatsappConnect() {
       const json = await res.json();
       const val = json.qr || null;
       setQrBase64(val ? (val.startsWith("data:") ? val : `data:image/png;base64,${val}`) : null);
-      setStatus(json.status === "connected" ? "conectado" : json.status === "qr_required" ? "reconectando" : "desconectado");
+      
+      const s = json.status;
+      setStatus(s === "connected" ? "conectado" : s === "qr_required" ? "reconectando" : "desconectado");
+      
+      // Se ainda não conectou e não tem QR, tentar novamente em breve
+      if (s !== "connected" && !val) {
+          // Lógica de retry implícita pelo botão ou polling
+      }
     } finally {
       setLoading(false);
     }

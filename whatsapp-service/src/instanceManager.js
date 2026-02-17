@@ -8,6 +8,7 @@ import Pino from "pino";
 import QRCode from "qrcode";
 import fs from "fs";
 import path from "path";
+import { saveMessage } from "./supabase.js";
 
 const sessionsDir = process.env.WHATSAPP_SESSIONS_DIR
   ? path.resolve(process.env.WHATSAPP_SESSIONS_DIR)
@@ -65,8 +66,42 @@ export async function createOrGetInstance(tenantId, wsNotify) {
   });
   sock.ev.on("messages.upsert", (m) => {
     if (wsNotify) wsNotify(tenantId, { type: "messages", payload: m });
+    // Persist messages to Supabase
+    for (const msg of m.messages) {
+      saveMessage(tenantId, msg);
+    }
   });
+
+  sock.ev.on("messaging-history.set", (history) => {
+    // Process history: contacts, chats, messages
+    const contacts = history.contacts || [];
+    const chats = history.chats || [];
+    const messages = history.messages || [];
+    
+    // Notify frontend
+    if (wsNotify) {
+      wsNotify(tenantId, { 
+        type: "history", 
+        payload: { 
+          contacts: contacts.map(c => ({ id: c.id, name: c.name || c.notify })),
+          chats: chats.map(c => ({ id: c.id, name: c.name, unread: c.unreadCount })),
+          messages: messages.map(m => m) // Send raw messages for now, frontend will filter
+        } 
+      });
+    }
+  });
+
   return sock;
+}
+
+export async function getProfilePic(tenantId, jid) {
+  const sock = instances.get(tenantId);
+  if (!sock) return null;
+  try {
+    return await sock.profilePictureUrl(jid, "image");
+  } catch {
+    return null;
+  }
 }
 
 export function getQr(tenantId) {
@@ -75,6 +110,10 @@ export function getQr(tenantId) {
 
 export function getStatus(tenantId) {
   return states.get(tenantId) || "disconnected";
+}
+
+export function getInstance(tenantId) {
+  return instances.get(tenantId);
 }
 
 export async function logout(tenantId) {

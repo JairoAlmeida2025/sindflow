@@ -21,32 +21,150 @@ export default function Conversations() {
 
   const [showDetails, setShowDetails] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  
+  const [profilePics, setProfilePics] = useState<Record<string, string>>({});
+  
+  // Audios
+  const audioIncoming = useRef(new Audio("/sounds/message_incoming.mp3"));
+  const audioSend = useRef(new Audio("/sounds/send_message.mp3"));
 
   useEffect(() => {
     (async () => {
       const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      // 1. Load initial data from Supabase
+      try {
+        // Load conversations
+        const { data: dbChats, error: chatError } = await supabase
+          .from("conversations")
+          .select(`
+            id, 
+            contact:contacts(wa_number, name), 
+            last_message_at,
+            messages(text, created_at, from_me)
+          `)
+          .order("last_message_at", { ascending: false });
+
+        if (dbChats) {
+          const formattedChats = dbChats.map(c => {
+            const lastMsg = c.messages?.[0]; // Assuming order or just taking one, ideally should be sorted in query or aggregate
+            // Better: use the view or just fetch last message
+            return {
+              id: c.contact?.wa_number || "",
+              name: c.contact?.name || c.contact?.wa_number || "Desconhecido",
+              last: lastMsg?.text || "",
+              time: c.last_message_at ? new Date(c.last_message_at).toLocaleTimeString().slice(0, 5) : "",
+              auto: false
+            };
+          }).filter(c => c.id);
+          setChats(formattedChats);
+        }
+
+        // Load recent messages for all chats (or optimize to load on select)
+        // For now, let's just load messages for the active chat when selected, 
+        // but to keep state simple with the current implementation, we might want to pre-load some.
+        // Actually, the current implementation filters `messages` state by `selectedId`.
+        // So we should probably load all recent messages or change the strategy.
+        // Let's load the last 50 messages globally for now to populate the view.
+        
+        const { data: dbMessages } = await supabase
+          .from("messages")
+          .select(`
+            id,
+            text,
+            created_at,
+            from_me,
+            media_url,
+            conversation:conversations(contact:contacts(wa_number))
+          `)
+          .order("created_at", { ascending: false })
+          .limit(100);
+
+        if (dbMessages) {
+          const formattedMsgs = dbMessages.reverse().map(m => ({
+            key: { 
+              remoteJid: m.conversation?.contact?.wa_number, 
+              fromMe: m.from_me, 
+              id: m.id 
+            },
+            message: { 
+              conversation: m.text,
+              ...(m.media_url ? { imageMessage: { url: m.media_url, caption: m.text } } : {}) 
+            },
+            messageTimestamp: new Date(m.created_at).getTime() / 1000,
+            pushName: "" // DB doesn't store pushName on message
+          }));
+          setMessages(formattedMsgs);
+        }
+
+      } catch (err) {
+        console.error("Error loading initial data:", err);
+      }
+
       const tenant = user ? `usr-${user.id}` : "default";
       const ws = new WebSocket(`${WHATSAPP_API_URL.replace("http", "ws")}/ws?tenantId=${encodeURIComponent(tenant)}`);
       ws.onmessage = (ev) => {
         try {
           const msg = JSON.parse(ev.data);
           if (msg.type === "qr" || msg.type === "status") return;
+          
+          if (msg.type === "history") {
+            const { contacts, chats, messages: histMessages } = msg.payload;
+            // Processar histórico inicial
+            // TODO: Implementar lógica mais robusta de merge
+            // Por enquanto, apenas adiciona mensagens se não existirem
+            setMessages(prev => {
+              const existingIds = new Set(prev.map(m => m.key.id));
+              const newMsgs = histMessages.filter((m: any) => !existingIds.has(m.key.id));
+              return [...prev, ...newMsgs];
+            });
+            // Atualizar chats baseado no histórico
+             // Simplificação: Criar chats a partir das mensagens recentes ou lista de chats
+          }
+
           if (msg.type === "messages") {
             const newMessages = msg.payload?.messages || [];
-            setMessages((prev) => [...prev, ...newMessages]);
+            
+            // Tocar som se houver mensagem nova recebida (não enviada por mim)
+            const hasIncoming = newMessages.some((m: any) => !m.key.fromMe);
+            if (hasIncoming) audioIncoming.current.play().catch(() => {});
+
+            setMessages((prev) => {
+              // Evitar duplicatas baseado no key.id
+              const existingIds = new Set(prev.map(m => m.key.id));
+              const uniqueNew = newMessages.filter((m: any) => !existingIds.has(m.key.id));
+              return [...prev, ...uniqueNew];
+            });
             
             // Atualizar lista de conversas com a última mensagem
             if (newMessages.length > 0) {
               const lastMsg = newMessages[newMessages.length - 1];
               const remoteJid = lastMsg.key.remoteJid;
               const text = lastMsg.message?.conversation || lastMsg.message?.extendedTextMessage?.text || "Imagem/Arquivo";
+              const pushName = lastMsg.pushName || remoteJid.replace("@s.whatsapp.net", "");
               
               setChats(prevChats => {
-                const existing = prevChats.find(c => c.id === remoteJid);
-                if (existing) {
-                   return prevChats.map(c => c.id === remoteJid ? { ...c, last: text, time: new Date().toLocaleTimeString().slice(0, 5) } : c);
+                const existingIndex = prevChats.findIndex(c => c.id === remoteJid);
+                // Buscar foto se não tiver
+                if (!profilePics[remoteJid]) {
+                    fetch(`${WHATSAPP_API_URL}/whatsapp/profile-pic?tenantId=${tenant}&jid=${remoteJid}`)
+                      .then(r => r.json())
+                      .then(d => { if(d.ok && d.url) setProfilePics(p => ({...p, [remoteJid]: d.url})) });
+                }
+
+                if (existingIndex >= 0) {
+                   const updated = [...prevChats];
+                   updated[existingIndex] = { 
+                     ...updated[existingIndex], 
+                     last: text, 
+                     time: new Date().toLocaleTimeString().slice(0, 5) 
+                   };
+                   // Move para o topo
+                   updated.unshift(updated.splice(existingIndex, 1)[0]);
+                   return updated;
                 } else {
-                   return [...prevChats, { id: remoteJid, name: lastMsg.pushName || remoteJid.replace("@s.whatsapp.net", ""), last: text, time: new Date().toLocaleTimeString().slice(0, 5), auto: false }];
+                   return [{ id: remoteJid, name: pushName, last: text, time: new Date().toLocaleTimeString().slice(0, 5), auto: false }, ...prevChats];
                 }
               });
             }
@@ -54,14 +172,61 @@ export default function Conversations() {
         } catch {}
       };
       wsRef.current = ws;
-      // Mock inicial removido para usar dados reais ou estado vazio
-      // setChats([{ id: "chat-default", name: "Conversas", last: "", time: "", auto: false }]);
-      // setSelectedId("chat-default");
     })();
     return () => {
       if (wsRef.current) wsRef.current.close();
     };
   }, []);
+
+  async function sendMessage() {
+    if (!input.trim() || !selectedId) return;
+    const text = input.trim();
+    setInput("");
+    
+    // Otimisticamente adicionar a mensagem na UI
+    const tempId = "temp-" + Date.now();
+    const optimisticMsg = {
+      key: { remoteJid: selectedId, fromMe: true, id: tempId },
+      message: { conversation: text },
+      messageTimestamp: Date.now() / 1000,
+      status: "sending"
+    };
+    setMessages(prev => [...prev, optimisticMsg]);
+    audioSend.current.play().catch(() => {});
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      const tenant = user ? `usr-${user.id}` : "default";
+      
+      const res = await fetch(`${WHATSAPP_API_URL}/whatsapp/send-text`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tenantId: tenant, jid: selectedId, text })
+      });
+      
+      if (!res.ok) throw new Error("Falha ao enviar");
+      
+      // Atualizar conversa na lista lateral
+      setChats(prevChats => {
+        const existingIndex = prevChats.findIndex(c => c.id === selectedId);
+        if (existingIndex >= 0) {
+           const updated = [...prevChats];
+           updated[existingIndex] = { 
+             ...updated[existingIndex], 
+             last: text, 
+             time: new Date().toLocaleTimeString().slice(0, 5) 
+           };
+           updated.unshift(updated.splice(existingIndex, 1)[0]);
+           return updated;
+        }
+        return prevChats;
+      });
+
+    } catch (err) {
+      console.error(err);
+      // Opcional: Marcar mensagem como erro na UI
+    }
+  }
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -101,7 +266,11 @@ export default function Conversations() {
                 borderBottom: "1px solid #f0f2f5"
               }}
             >
-              <div style={{ width: 49, height: 49, borderRadius: "50%", background: "#dfe5e7", marginRight: 15 }}></div>
+              <div style={{ width: 49, height: 49, borderRadius: "50%", background: "#dfe5e7", marginRight: 15, overflow: "hidden" }}>
+                {profilePics[c.id] ? (
+                  <img src={profilePics[c.id]} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                ) : null}
+              </div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
                   <span style={{ fontSize: 17, color: "#111b21", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.name}</span>
@@ -124,7 +293,11 @@ export default function Conversations() {
             {/* Header do Chat */}
             <header style={{ padding: "10px 16px", background: "#f0f2f5", borderBottom: "1px solid #d1d7db", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
               <div style={{ display: "flex", alignItems: "center", cursor: "pointer" }} onClick={() => setShowDetails(!showDetails)}>
-                <div style={{ width: 40, height: 40, borderRadius: "50%", background: "#dfe5e7", marginRight: 15 }}></div>
+                <div style={{ width: 40, height: 40, borderRadius: "50%", background: "#dfe5e7", marginRight: 15, overflow: "hidden" }}>
+                  {profilePics[activeChat?.id || ""] ? (
+                    <img src={profilePics[activeChat?.id || ""]} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                  ) : null}
+                </div>
                 <div>
                   <div style={{ fontSize: 16, color: "#111b21" }}>{activeChat?.name}</div>
                   <div style={{ fontSize: 13, color: "#667781" }}>clique para dados do contato</div>
@@ -174,11 +347,12 @@ export default function Conversations() {
               <input 
                 value={input} 
                 onChange={e => setInput(e.target.value)} 
+                onKeyDown={e => e.key === "Enter" && sendMessage()}
                 placeholder="Digite uma mensagem" 
                 style={{ flex: 1, padding: "9px 12px", borderRadius: 8, border: "none", outline: "none", fontSize: 15 }} 
               />
               {input ? (
-                <button className="btn-primary" style={{ padding: "8px 16px" }}>➤</button>
+                <button onClick={sendMessage} className="btn-primary" style={{ padding: "8px 16px" }}>➤</button>
               ) : (
                 <span style={{ fontSize: 24, color: "#54656f", cursor: "pointer" }}>🎤</span>
               )}
@@ -200,7 +374,11 @@ export default function Conversations() {
             <span style={{ fontSize: 16, color: "#111b21" }}>Dados do contato</span>
           </header>
           <div style={{ padding: "24px 0", display: "flex", flexDirection: "column", alignItems: "center", borderBottom: "10px solid #f0f2f5" }}>
-             <div style={{ width: 200, height: 200, borderRadius: "50%", background: "#dfe5e7", marginBottom: 15 }}></div>
+             <div style={{ width: 200, height: 200, borderRadius: "50%", background: "#dfe5e7", marginBottom: 15, overflow: "hidden" }}>
+                {profilePics[activeChat?.id || ""] ? (
+                  <img src={profilePics[activeChat?.id || ""]} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                ) : null}
+             </div>
              <h2 style={{ fontSize: 22, color: "#111b21", fontWeight: 400 }}>{activeChat?.name}</h2>
              <span style={{ fontSize: 16, color: "#667781" }}>{activeChat?.id?.replace("@s.whatsapp.net", "")}</span>
           </div>
