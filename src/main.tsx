@@ -18,6 +18,7 @@ import Contacts from "./pages/client/Contacts";
 import Notes from "./pages/client/Notes";
 import AccountSettings from "./pages/client/AccountSettings";
 import WhatsappConnect from "./pages/client/WhatsappConnect";
+import Conexao from "./pages/client/Conexao";
 import MasterLogin from "./pages/master/MasterLogin";
 import MasterDashboard from "./pages/master/MasterDashboard";
 import MasterApis from "./pages/master/MasterApis";
@@ -57,6 +58,7 @@ root.render(
           <Route path="anotacoes" element={<Notes />} />
           <Route path="configuracoes" element={<AccountSettings />} />
           <Route path="whatsapp" element={<WhatsappConnect />} />
+          <Route path="conexao" element={<Conexao />} />
           <Route index element={<Navigate to="conversas" replace />} />
         </Route>
         

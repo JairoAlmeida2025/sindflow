@@ -60,6 +60,26 @@ function candidateJidsFromInput(jidOrPhone) {
   return Array.from(new Set(out.filter(Boolean)));
 }
 
+async function candidateJidsForSend(sock, jidOrPhone) {
+  const base = candidateJidsFromInput(jidOrPhone);
+  const out = [];
+  for (const jid of base) {
+    const isPn = typeof jid === "string" && jid.endsWith("@s.whatsapp.net");
+    if (isPn) {
+      const phone = normalizePhoneDigits(jid.replace(/@.*$/, ""));
+      const getLidForPn = sock?.signalRepository?.lidMapping?.getLIDForPN;
+      if (phone && typeof getLidForPn === "function") {
+        try {
+          const lid = await getLidForPn(phone);
+          if (lid) out.push(String(lid));
+        } catch {}
+      }
+    }
+    out.push(jid);
+  }
+  return Array.from(new Set(out.filter(Boolean)));
+}
+
 async function sendWithFallback(sock, candidates, message) {
   let lastErr = null;
   for (const jid of candidates) {
@@ -124,6 +144,23 @@ function wsNotify(tenantId, data) {
   }
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function ensureReadyToSend(tenantId, sock, timeoutMs = 12000) {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    const status = getStatus(tenantId);
+    if (status === "connected" && sock?.user?.id) return { ok: true };
+    if (status === "qr_required") {
+      return { ok: false, status, qr: getQr(tenantId) };
+    }
+    await sleep(250);
+  }
+  return { ok: false, status: getStatus(tenantId), qr: getQr(tenantId) };
+}
+
 async function ensureInstance(tenantId) {
   let sock = getInstance(tenantId);
   if (!sock) {
@@ -160,9 +197,11 @@ app.post("/whatsapp/send-text", async (req, res) => {
   if (!jid || !text) return res.status(400).json({ ok: false, error: "missing jid or text" });
 
   const sock = await ensureInstance(tenantId);
+  const ready = await ensureReadyToSend(tenantId, sock);
+  if (!ready.ok) return res.status(409).json({ ok: false, error: "not connected", status: ready.status, qr: ready.qr || null });
 
   try {
-    const candidates = candidateJidsFromInput(jid);
+    const candidates = await candidateJidsForSend(sock, jid);
     if (candidates.length === 0) return res.status(400).json({ ok: false, error: "invalid jid" });
     const { sent, jidUsed } = await sendWithFallback(sock, candidates, { text });
     console.log(`[whatsapp] sent text to ${jidUsed} by tenant ${tenantId} (tried=${candidates.join(",")})`);
@@ -180,6 +219,8 @@ app.post("/whatsapp/send-audio", async (req, res) => {
   if (!jid || !dataUrl) return res.status(400).json({ ok: false, error: "missing jid or dataUrl" });
 
   const sock = await ensureInstance(tenantId);
+  const ready = await ensureReadyToSend(tenantId, sock);
+  if (!ready.ok) return res.status(409).json({ ok: false, error: "not connected", status: ready.status, qr: ready.qr || null });
 
   try {
     const match = String(dataUrl).match(/^data:(.*?);base64,(.*)$/);
@@ -187,7 +228,7 @@ app.post("/whatsapp/send-audio", async (req, res) => {
     let mime = match[1] || "audio/ogg";
     const b64 = match[2];
     const buffer = Buffer.from(b64, "base64");
-    const candidates = candidateJidsFromInput(jid);
+    const candidates = await candidateJidsForSend(sock, jid);
     if (candidates.length === 0) return res.status(400).json({ ok: false, error: "invalid jid" });
     if (mime === "audio/webm") {
       mime = "audio/ogg"; // força container aceito
@@ -207,8 +248,10 @@ app.post("/whatsapp/send-image", async (req, res) => {
   const { jid, dataUrl, url, caption } = req.body || {};
   if (!jid || (!dataUrl && !url)) return res.status(400).json({ ok: false, error: "missing jid or media source" });
   const sock = await ensureInstance(tenantId);
+  const ready = await ensureReadyToSend(tenantId, sock);
+  if (!ready.ok) return res.status(409).json({ ok: false, error: "not connected", status: ready.status, qr: ready.qr || null });
   try {
-    const candidates = candidateJidsFromInput(jid);
+    const candidates = await candidateJidsForSend(sock, jid);
     if (candidates.length === 0) return res.status(400).json({ ok: false, error: "invalid jid" });
     const parsed = dataUrl ? parseDataUrl(dataUrl) : await getBufferFromUrl(url);
     const { sent, jidUsed } = await sendWithFallback(sock, candidates, { image: parsed.buffer, mimetype: parsed.mime || "image/jpeg", caption: caption || "" });
@@ -226,8 +269,10 @@ app.post("/whatsapp/send-video", async (req, res) => {
   const { jid, dataUrl, url, caption } = req.body || {};
   if (!jid || (!dataUrl && !url)) return res.status(400).json({ ok: false, error: "missing jid or media source" });
   const sock = await ensureInstance(tenantId);
+  const ready = await ensureReadyToSend(tenantId, sock);
+  if (!ready.ok) return res.status(409).json({ ok: false, error: "not connected", status: ready.status, qr: ready.qr || null });
   try {
-    const candidates = candidateJidsFromInput(jid);
+    const candidates = await candidateJidsForSend(sock, jid);
     if (candidates.length === 0) return res.status(400).json({ ok: false, error: "invalid jid" });
     const parsed = dataUrl ? parseDataUrl(dataUrl) : await getBufferFromUrl(url);
     const { sent, jidUsed } = await sendWithFallback(sock, candidates, { video: parsed.buffer, mimetype: parsed.mime || "video/mp4", caption: caption || "" });
@@ -245,8 +290,10 @@ app.post("/whatsapp/send-document", async (req, res) => {
   const { jid, dataUrl, url, fileName, mime } = req.body || {};
   if (!jid || (!dataUrl && !url)) return res.status(400).json({ ok: false, error: "missing jid or media source" });
   const sock = await ensureInstance(tenantId);
+  const ready = await ensureReadyToSend(tenantId, sock);
+  if (!ready.ok) return res.status(409).json({ ok: false, error: "not connected", status: ready.status, qr: ready.qr || null });
   try {
-    const candidates = candidateJidsFromInput(jid);
+    const candidates = await candidateJidsForSend(sock, jid);
     if (candidates.length === 0) return res.status(400).json({ ok: false, error: "invalid jid" });
     const parsed = dataUrl ? parseDataUrl(dataUrl) : await getBufferFromUrl(url);
     const { sent, jidUsed } = await sendWithFallback(sock, candidates, { document: parsed.buffer, fileName: fileName || "arquivo", mimetype: mime || parsed.mime || "application/octet-stream" });
@@ -264,8 +311,10 @@ app.post("/whatsapp/send-sticker", async (req, res) => {
   const { jid, dataUrl, url } = req.body || {};
   if (!jid || (!dataUrl && !url)) return res.status(400).json({ ok: false, error: "missing jid or media source" });
   const sock = await ensureInstance(tenantId);
+  const ready = await ensureReadyToSend(tenantId, sock);
+  if (!ready.ok) return res.status(409).json({ ok: false, error: "not connected", status: ready.status, qr: ready.qr || null });
   try {
-    const candidates = candidateJidsFromInput(jid);
+    const candidates = await candidateJidsForSend(sock, jid);
     if (candidates.length === 0) return res.status(400).json({ ok: false, error: "invalid jid" });
     const parsed = dataUrl ? parseDataUrl(dataUrl) : await getBufferFromUrl(url);
     const { sent, jidUsed } = await sendWithFallback(sock, candidates, { sticker: parsed.buffer });
@@ -283,8 +332,10 @@ app.post("/whatsapp/send-location", async (req, res) => {
   const { jid, lat, lng, name, address } = req.body || {};
   if (!jid || typeof lat !== "number" || typeof lng !== "number") return res.status(400).json({ ok: false, error: "missing jid or coordinates" });
   const sock = await ensureInstance(tenantId);
+  const ready = await ensureReadyToSend(tenantId, sock);
+  if (!ready.ok) return res.status(409).json({ ok: false, error: "not connected", status: ready.status, qr: ready.qr || null });
   try {
-    const candidates = candidateJidsFromInput(jid);
+    const candidates = await candidateJidsForSend(sock, jid);
     if (candidates.length === 0) return res.status(400).json({ ok: false, error: "invalid jid" });
     const { sent, jidUsed } = await sendWithFallback(sock, candidates, { location: { degreesLatitude: lat, degreesLongitude: lng, name, address } });
     console.log(`[whatsapp] sent location to ${jidUsed} by tenant ${tenantId} (tried=${candidates.join(",")})`);
@@ -301,8 +352,10 @@ app.post("/whatsapp/send-contact", async (req, res) => {
   const { jid, vcard, displayName } = req.body || {};
   if (!jid || !vcard) return res.status(400).json({ ok: false, error: "missing jid or vcard" });
   const sock = await ensureInstance(tenantId);
+  const ready = await ensureReadyToSend(tenantId, sock);
+  if (!ready.ok) return res.status(409).json({ ok: false, error: "not connected", status: ready.status, qr: ready.qr || null });
   try {
-    const candidates = candidateJidsFromInput(jid);
+    const candidates = await candidateJidsForSend(sock, jid);
     if (candidates.length === 0) return res.status(400).json({ ok: false, error: "invalid jid" });
     const { sent, jidUsed } = await sendWithFallback(sock, candidates, { contacts: { displayName: displayName || "Contato", contacts: [{ vcard }] } });
     console.log(`[whatsapp] sent contact to ${jidUsed} by tenant ${tenantId} (tried=${candidates.join(",")})`);

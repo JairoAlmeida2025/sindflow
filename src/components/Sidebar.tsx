@@ -3,6 +3,7 @@ import { NavLink } from "react-router-dom";
 const items = [
   { to: "/app/conversas", label: "Conversas" },
   { to: "/app/whatsapp", label: "Conexão WhatsApp" },
+  { to: "/app/conexao", label: "Conexão" },
   { to: "/app/agente", label: "Agente IA" },
   { to: "/app/kanban", label: "Solicitações" },
   { to: "/app/contatos", label: "Moradores" },

@@ -197,6 +197,15 @@ export default function Conversations() {
           .limit(100);
 
         if (dbMessages) {
+          const inferMediaKind = (url?: string | null) => {
+            const u = String(url || "");
+            const path = u.split("?")[0].toLowerCase();
+            if (path.endsWith(".ogg") || path.endsWith(".opus") || path.endsWith(".mp3") || path.endsWith(".m4a")) return "audio";
+            if (path.endsWith(".mp4") || path.endsWith(".webm")) return "video";
+            if (path.endsWith(".jpg") || path.endsWith(".jpeg") || path.endsWith(".png") || path.endsWith(".gif") || path.endsWith(".webp")) return "image";
+            if (path.endsWith(".pdf")) return "pdf";
+            return u ? "document" : "none";
+          };
           const formattedMsgs = dbMessages.reverse().map(m => ({
             key: { 
               remoteJid: normalizeJid(m.conversation?.contact?.wa_number || ""), 
@@ -205,7 +214,10 @@ export default function Conversations() {
             },
             message: { 
               conversation: m.text,
-              ...(m.media_url ? { imageMessage: { url: m.media_url, caption: m.text } } : {}) 
+              ...(inferMediaKind(m.media_url) === "image" ? { imageMessage: { url: m.media_url, caption: m.text } } : {}),
+              ...(inferMediaKind(m.media_url) === "video" ? { videoMessage: { url: m.media_url } } : {}),
+              ...(inferMediaKind(m.media_url) === "audio" ? { audioMessage: { url: m.media_url } } : {}),
+              ...(inferMediaKind(m.media_url) === "pdf" || inferMediaKind(m.media_url) === "document" ? { documentMessage: { url: m.media_url, mimetype: inferMediaKind(m.media_url) === "pdf" ? "application/pdf" : "application/octet-stream" } } : {})
             },
             messageTimestamp: new Date(m.created_at).getTime() / 1000,
             pushName: "" // DB doesn't store pushName on message
