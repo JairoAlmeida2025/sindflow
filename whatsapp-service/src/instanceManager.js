@@ -8,7 +8,7 @@ import Pino from "pino";
 import QRCode from "qrcode";
 import fs from "fs";
 import path from "path";
-import { saveMessage } from "./supabase.js";
+import { saveMessage, normalizeJidFromMessage, updateContactAvatar } from "./supabase.js";
 
 const sessionsDir = process.env.WHATSAPP_SESSIONS_DIR
   ? path.resolve(process.env.WHATSAPP_SESSIONS_DIR)
@@ -68,6 +68,24 @@ export async function createOrGetInstance(tenantId, wsNotify) {
     if (wsNotify) wsNotify(tenantId, { type: "messages", payload: m });
     // Persist messages to Supabase
     for (const msg of m.messages) {
+      try {
+        const { jid, phone } = normalizeJidFromMessage(msg);
+        const typeKey = Object.keys(msg.message || {})[0] || null;
+        const text = msg.message?.conversation || msg.message?.extendedTextMessage?.text || null;
+        console.log(
+          JSON.stringify({
+            event: "message",
+            tenantId,
+            jid,
+            phone,
+            type: typeKey,
+            text,
+            fromMe: !!msg.key?.fromMe,
+            id: msg.key?.id,
+            ts: msg.messageTimestamp
+          })
+        );
+      } catch {}
       saveMessage(tenantId, msg);
     }
   });
@@ -98,7 +116,17 @@ export async function getProfilePic(tenantId, jid) {
   const sock = instances.get(tenantId);
   if (!sock) return null;
   try {
-    return await sock.profilePictureUrl(jid, "image");
+    // Normalize JID for consistency
+    let normJid = jid;
+    if (typeof normJid === "string" && normJid.endsWith("@lid")) {
+      normJid = normJid.replace("@lid", "@s.whatsapp.net");
+    }
+    const url = await sock.profilePictureUrl(normJid, "image");
+    if (url) {
+      const userId = tenantId.replace("usr-", "");
+      await updateContactAvatar(userId, normJid, url);
+    }
+    return url;
   } catch {
     return null;
   }

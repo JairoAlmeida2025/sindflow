@@ -14,18 +14,42 @@ if (SUPABASE_URL && SUPABASE_KEY) {
   console.warn("SUPABASE_URL or SUPABASE_SERVICE_KEY not set. Database persistence disabled.");
 }
 
+export function normalizeJidFromMessage(message) {
+  try {
+    const key = message?.key || {};
+    let rjid = key.remoteJid || "";
+    const alt = key.remoteJidAlt;
+    if (typeof rjid === "string" && rjid.endsWith("@lid")) {
+      if (alt && typeof alt === "string") {
+        rjid = alt;
+      } else {
+        rjid = rjid.replace("@lid", "@s.whatsapp.net");
+      }
+    }
+    // handle c.us to s.whatsapp.net normalization
+    if (rjid.endsWith("@c.us")) {
+      rjid = rjid.replace("@c.us", "@s.whatsapp.net");
+    }
+    const phone = rjid.replace(/@.*$/, "");
+    return { jid: rjid, phone };
+  } catch {
+    const rjid = message?.key?.remoteJid || "";
+    return { jid: rjid, phone: rjid.replace(/@.*$/, "") };
+  }
+}
+
 export async function saveMessage(tenantId, message) {
   if (!supabase) return;
 
   try {
     const userId = tenantId.replace("usr-", "");
     const { key, messageTimestamp, pushName } = message;
-    const remoteJid = key.remoteJid;
+    const { jid: remoteJidNorm, phone } = normalizeJidFromMessage(message);
     const fromMe = key.fromMe;
     const id = key.id;
     
     // Ignore status updates
-    if (remoteJid === "status@broadcast") return;
+    if (remoteJidNorm === "status@broadcast") return;
 
     // Extract text content
     const content = message.message?.conversation || 
@@ -51,7 +75,7 @@ export async function saveMessage(tenantId, message) {
                 { logger: Pino({ level: 'silent' }) }
             );
             
-            const fileName = `${userId}/${remoteJid}/${Date.now()}_${id}.${getContentType(messageType)}`;
+            const fileName = `${userId}/${remoteJidNorm}/${Date.now()}_${id}.${getContentType(messageType)}`;
             const { data, error } = await supabase.storage
                 .from('chat-media')
                 .upload(fileName, buffer, {
@@ -76,8 +100,8 @@ export async function saveMessage(tenantId, message) {
       .upsert(
         { 
           user_id: userId, 
-          wa_number: remoteJid, 
-          name: pushName || remoteJid.replace("@s.whatsapp.net", "") 
+          wa_number: remoteJidNorm, 
+          name: pushName || phone 
         }, 
         { onConflict: "user_id, wa_number" }
       )
@@ -122,6 +146,27 @@ export async function saveMessage(tenantId, message) {
   }
 }
 
+export async function updateContactAvatar(userId, waNumber, url) {
+  if (!supabase) return;
+  try {
+    const { error } = await supabase
+      .from("contacts")
+      .upsert(
+        {
+          user_id: userId,
+          wa_number: waNumber,
+          metadata: { avatar_url: url }
+        },
+        { onConflict: "user_id, wa_number" }
+      );
+    if (error) {
+      console.error("Failed to upsert avatar_url:", error);
+    }
+  } catch (err) {
+    console.error("Failed to update avatar_url:", err);
+  }
+}
+
 function getContentType(type) {
     switch (type) {
         case "imageMessage": return "jpg";
@@ -137,7 +182,7 @@ function getMimeType(type) {
     switch (type) {
         case "imageMessage": return "image/jpeg";
         case "videoMessage": return "video/mp4";
-        case "audioMessage": return "audio/mp4"; // WhatsApp uses mp4 for audio usually
+        case "audioMessage": return "audio/ogg"; // Prefer opus from web recorder
         case "stickerMessage": return "image/webp";
         default: return "application/octet-stream";
     }

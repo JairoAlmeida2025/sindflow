@@ -98,6 +98,29 @@ app.post("/whatsapp/send-text", async (req, res) => {
   }
 });
 
+app.post("/whatsapp/send-audio", async (req, res) => {
+  const tenantId = getTenantId(req);
+  if (!tenantId) return res.status(400).json({ ok: false, error: "missing tenantId" });
+  const { jid, dataUrl, ptt } = req.body || {};
+  if (!jid || !dataUrl) return res.status(400).json({ ok: false, error: "missing jid or dataUrl" });
+
+  const sock = getInstance(tenantId);
+  if (!sock) return res.status(404).json({ ok: false, error: "instance not found" });
+
+  try {
+    const match = String(dataUrl).match(/^data:(.*?);base64,(.*)$/);
+    if (!match) return res.status(400).json({ ok: false, error: "invalid dataUrl" });
+    const mime = match[1] || "audio/ogg";
+    const b64 = match[2];
+    const buffer = Buffer.from(b64, "base64");
+    const sent = await sock.sendMessage(jid, { audio: buffer, mimetype: mime, ptt: !!ptt });
+    return res.json({ ok: true, data: sent });
+  } catch (err) {
+    console.error("Error sending audio:", err);
+    return res.status(500).json({ ok: false, error: "failed to send audio" });
+  }
+});
+
 app.get("/whatsapp/profile-pic", async (req, res) => {
   const tenantId = String(req.query.tenantId || "");
   const jid = String(req.query.jid || "");

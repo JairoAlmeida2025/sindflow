@@ -24,9 +24,33 @@ export default function Conversations() {
   
   const [profilePics, setProfilePics] = useState<Record<string, string>>({});
   
-  // Audios
-  const audioIncoming = useRef(new Audio("/sounds/message_incoming.mp3"));
-  const audioSend = useRef(new Audio("/sounds/send_message.mp3"));
+  // Audio feedback via WebAudio (sem arquivos)
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  function playBeep(freq: number, ms = 140) {
+    try {
+      const ctx = audioCtxRef.current || new (window.AudioContext || (window as any).webkitAudioContext)();
+      audioCtxRef.current = ctx;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.value = freq;
+      gain.gain.value = 0.2;
+      osc.connect(gain).connect(ctx.destination);
+      osc.start();
+      setTimeout(() => {
+        osc.stop();
+        osc.disconnect();
+        gain.disconnect();
+      }, ms);
+    } catch {}
+  }
+  const playIncoming = () => playBeep(880);
+  const playSend = () => playBeep(660);
+
+  // Gravação de áudio
+  const [isRecording, setIsRecording] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordChunksRef = useRef<BlobPart[]>([]);
 
   useEffect(() => {
     (async () => {
@@ -36,11 +60,11 @@ export default function Conversations() {
       // 1. Load initial data from Supabase
       try {
         // Load conversations
-        const { data: dbChats, error: chatError } = await supabase
+        const { data: dbChats } = await supabase
           .from("conversations")
           .select(`
             id, 
-            contact:contacts(wa_number, name), 
+            contact:contacts(wa_number, name, metadata), 
             last_message_at,
             messages(text, created_at, from_me)
           `)
@@ -51,7 +75,7 @@ export default function Conversations() {
             const lastMsg = c.messages?.[0]; // Assuming order or just taking one, ideally should be sorted in query or aggregate
             // Better: use the view or just fetch last message
             return {
-              id: c.contact?.wa_number || "",
+              id: normalizeJid(c.contact?.wa_number || ""),
               name: c.contact?.name || c.contact?.wa_number || "Desconhecido",
               last: lastMsg?.text || "",
               time: c.last_message_at ? new Date(c.last_message_at).toLocaleTimeString().slice(0, 5) : "",
@@ -59,6 +83,14 @@ export default function Conversations() {
             };
           }).filter(c => c.id);
           setChats(formattedChats);
+          // Avatar inicial via metadata
+          const initialPics: Record<string, string> = {};
+          for (const c of dbChats) {
+            const jid = normalizeJid(c.contact?.wa_number || "");
+            const url = c.contact?.metadata?.avatar_url;
+            if (jid && url) initialPics[jid] = url;
+          }
+          setProfilePics(prev => ({ ...initialPics, ...prev }));
         }
 
         // Load recent messages for all chats (or optimize to load on select)
@@ -84,7 +116,7 @@ export default function Conversations() {
         if (dbMessages) {
           const formattedMsgs = dbMessages.reverse().map(m => ({
             key: { 
-              remoteJid: m.conversation?.contact?.wa_number, 
+              remoteJid: normalizeJid(m.conversation?.contact?.wa_number || ""), 
               fromMe: m.from_me, 
               id: m.id 
             },
@@ -128,19 +160,24 @@ export default function Conversations() {
             
             // Tocar som se houver mensagem nova recebida (não enviada por mim)
             const hasIncoming = newMessages.some((m: any) => !m.key.fromMe);
-            if (hasIncoming) audioIncoming.current.play().catch(() => {});
+            if (hasIncoming) playIncoming();
 
             setMessages((prev) => {
               // Evitar duplicatas baseado no key.id
               const existingIds = new Set(prev.map(m => m.key.id));
-              const uniqueNew = newMessages.filter((m: any) => !existingIds.has(m.key.id));
+              const uniqueNew = newMessages
+                .map((m: any) => ({
+                  ...m,
+                  key: { ...m.key, remoteJid: normalizeJid(m.key.remoteJid) }
+                }))
+                .filter((m: any) => !existingIds.has(m.key.id));
               return [...prev, ...uniqueNew];
             });
             
             // Atualizar lista de conversas com a última mensagem
             if (newMessages.length > 0) {
               const lastMsg = newMessages[newMessages.length - 1];
-              const remoteJid = lastMsg.key.remoteJid;
+              const remoteJid = normalizeJid(lastMsg.key.remoteJid);
               const text = lastMsg.message?.conversation || lastMsg.message?.extendedTextMessage?.text || "Imagem/Arquivo";
               const pushName = lastMsg.pushName || remoteJid.replace("@s.whatsapp.net", "");
               
@@ -192,7 +229,7 @@ export default function Conversations() {
       status: "sending"
     };
     setMessages(prev => [...prev, optimisticMsg]);
-    audioSend.current.play().catch(() => {});
+    playSend();
 
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -226,6 +263,69 @@ export default function Conversations() {
       console.error(err);
       // Opcional: Marcar mensagem como erro na UI
     }
+  }
+
+  async function startRecording() {
+    if (isRecording) return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mr = new MediaRecorder(stream, { mimeType: "audio/webm" });
+      recordChunksRef.current = [];
+      mr.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) recordChunksRef.current.push(e.data);
+      };
+      mr.onstop = async () => {
+        const blob = new Blob(recordChunksRef.current, { type: "audio/webm" });
+        const dataUrl = await blobToDataURL(blob);
+        await sendAudio(dataUrl);
+        stream.getTracks().forEach(t => t.stop());
+      };
+      mediaRecorderRef.current = mr;
+      mr.start();
+      setIsRecording(true);
+    } catch (err) {
+      console.error("Falha ao iniciar gravação:", err);
+    }
+  }
+
+  async function stopRecording() {
+    if (!isRecording) return;
+    setIsRecording(false);
+    try {
+      mediaRecorderRef.current?.stop();
+    } catch {}
+  }
+
+  async function sendAudio(dataUrl: string) {
+    if (!selectedId) return;
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      const tenant = user ? `usr-${user.id}` : "default";
+      await fetch(`${WHATSAPP_API_URL}/whatsapp/send-audio`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tenantId: tenant, jid: selectedId, dataUrl, ptt: true })
+      });
+      playSend();
+    } catch (err) {
+      console.error("Falha ao enviar áudio:", err);
+    }
+  }
+
+  function normalizeJid(jid: string) {
+    if (!jid) return jid;
+    if (jid.endsWith("@lid")) return jid.replace("@lid", "@s.whatsapp.net");
+    if (jid.endsWith("@c.us")) return jid.replace("@c.us", "@s.whatsapp.net");
+    return jid;
+  }
+
+  function blobToDataURL(blob: Blob): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(String(reader.result));
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
   }
 
   useEffect(() => {
@@ -354,7 +454,9 @@ export default function Conversations() {
               {input ? (
                 <button onClick={sendMessage} className="btn-primary" style={{ padding: "8px 16px" }}>➤</button>
               ) : (
-                <span style={{ fontSize: 24, color: "#54656f", cursor: "pointer" }}>🎤</span>
+                <button onMouseDown={startRecording} onMouseUp={stopRecording} onTouchStart={startRecording} onTouchEnd={stopRecording} style={{ padding: "8px 12px" }}>
+                  {isRecording ? "Gravando..." : "🎤"}
+                </button>
               )}
             </footer>
           </>
