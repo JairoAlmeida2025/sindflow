@@ -66,6 +66,10 @@ export default function Conexao() {
         if (session) {
           setActiveSessionId(session.session_id);
           setStatus(session.status);
+        } else {
+          // Tabela vazia - garantir que mostra formulário de nova conexão
+          setActiveSessionId(null);
+          setStatus(null);
         }
       }
     }
@@ -162,16 +166,17 @@ export default function Conexao() {
 
       console.log("handleDeleteInstance: Webhook response status:", res.status);
 
-      // Parsear resposta
-      const ct = res.headers.get("content-type") || "";
+      // Parsear resposta (ler apenas UMA vez)
       let payload: any = null;
-      if (ct.includes("application/json")) {
-        try { payload = await res.json(); } catch {
-          const txt = await res.text(); try { payload = JSON.parse(txt); } catch { payload = txt; }
-        }
-      } else {
+      try {
         const txt = await res.text();
-        try { payload = JSON.parse(txt); } catch { payload = txt; }
+        try {
+          payload = JSON.parse(txt);
+        } catch {
+          payload = txt;
+        }
+      } catch (e) {
+        console.warn("Failed to read response:", e);
       }
 
       if (!res.ok) {
@@ -180,6 +185,16 @@ export default function Conexao() {
       }
 
       console.log("handleDeleteInstance: Webhook success:", payload);
+
+      // Extrair mensagem de sucesso do webhook
+      let successMessage = "Instância deletada com sucesso! ✅";
+      if (Array.isArray(payload) && payload[0]?.response?.message) {
+        successMessage = payload[0].response.message + " ✅";
+      } else if (payload?.response?.message) {
+        successMessage = payload.response.message + " ✅";
+      } else if (payload?.message) {
+        successMessage = payload.message + " ✅";
+      }
 
       // 2. Garantir animação mínima de 5 segundos
       const elapsed = Date.now() - startTime;
@@ -194,12 +209,12 @@ export default function Conexao() {
         .delete()
         .eq("user_id", userId);
 
-      // 4. Resetar estado
+      // 4. Resetar estado completamente para permitir nova conexão
       setConnectionName("");
       setQrDataUrl(null);
       setStatus(null);
       setActiveSessionId(null);
-      setDisconnectMessage("Instância deletada com sucesso! ✅");
+      setDisconnectMessage(successMessage);
 
       console.log("handleDeleteInstance: Complete!");
     } catch (e: any) {
