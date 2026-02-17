@@ -8,37 +8,30 @@ import { createOrGetInstance, getQr, getStatus, logout } from "./instanceManager
 const app = express();
 app.use(express.json());
 
-function parseOrigins(value) {
-  if (!value) return [];
-  return value
-    .split(",")
-    .map((s) => s.trim().replace(/^["'`]+|["'`]+$/g, ""))
-    .filter(Boolean);
-}
+// Log middleware for debugging
+app.use((req, res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+  console.log('Headers:', JSON.stringify(req.headers));
+  next();
+});
 
-const allowlistRaw = [
-  ...parseOrigins(process.env.CORS_ORIGINS),
-  ...parseOrigins(process.env.CORS_ORIGIN)
-];
-const allowlist = allowlistRaw.length ? allowlistRaw : ["*"];
+// Simplified CORS for troubleshooting
+app.use(cors({
+  origin: "*",
+  methods: ["GET", "POST", "DELETE", "OPTIONS", "PUT", "PATCH"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept", "Origin"],
+  credentials: false
+}));
 
-const corsOptions = {
-  origin: function (origin, callback) {
-    if (!origin) return callback(null, true); // allow non-browser clients
-    if (allowlist.includes("*") || allowlist.includes(origin)) {
-      return callback(null, true);
-    }
-    return callback(null, false);
-  },
-  methods: ["GET","POST","DELETE","OPTIONS"],
-  allowedHeaders: ["Content-Type","Authorization"],
-  credentials: false,
-  optionsSuccessStatus: 204,
-  preflightContinue: false
-};
-
-app.use(cors(corsOptions));
-app.options("*", cors(corsOptions)); // enable preflight globally
+// Endpoint de teste de CORS e saude
+app.get("/health", (req, res) => res.json({ ok: true, timestamp: new Date() }));
+app.get("/debug-cors", (req, res) => {
+  res.json({
+    ok: true,
+    headers: req.headers,
+    cors_origin_env: process.env.CORS_ORIGINS
+  });
+});
 
 function getTenantId(req) {
   const b = req.body?.tenantId;
