@@ -58,6 +58,7 @@ export default function Conexao() {
     } catch {}
 
     setLoading(true);
+    const startedAt = Date.now();
     try {
       const res = await fetch(WEBHOOK_URL, {
         method: "POST",
@@ -84,8 +85,13 @@ export default function Conexao() {
         return;
       }
 
+      const elapsed = Date.now() - startedAt;
+      if (elapsed < 5000) {
+        await new Promise((r) => setTimeout(r, 5000 - elapsed));
+      }
+
       const data = payload;
-      const qr = Array.isArray(data) ? data[0]?.base64 : data?.base64;
+      const qr = Array.isArray(data) ? (data[0]?.qrcode || data[0]?.base64) : (data?.qrcode || data?.base64);
       if (qr && typeof qr === "string") {
         setQrDataUrl(qr.startsWith("data:image/") ? qr : `data:image/png;base64,${qr}`);
         try {
@@ -131,7 +137,7 @@ export default function Conexao() {
         return;
       }
 
-      setError("Resposta do n8n não contém um QRCode em base64.");
+      setError("Resposta do n8n não contém o campo qrcode/base64.");
     } catch (e) {
       setError("Falha de rede ao chamar o n8n. Tente novamente.");
     } finally {
