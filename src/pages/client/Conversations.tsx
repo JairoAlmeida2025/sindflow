@@ -343,7 +343,7 @@ export default function Conversations() {
       const res = await fetch(`${WHATSAPP_API_URL}/whatsapp/send-text`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tenantId: tenant, jid: selectedId, text })
+        body: JSON.stringify({ tenantId: tenant, jid: normalizeForSend(selectedId), text })
       });
       
       if (!res.ok) throw new Error("Falha ao enviar");
@@ -476,7 +476,7 @@ export default function Conversations() {
       await fetch(`${WHATSAPP_API_URL}/whatsapp/send-audio`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tenantId: tenant, jid: selectedId, dataUrl, ptt: true })
+        body: JSON.stringify({ tenantId: tenant, jid: normalizeForSend(selectedId), dataUrl, ptt: true })
       });
       audioSend.current?.play().catch(() => {});
       setRecording("idle");
@@ -495,10 +495,11 @@ export default function Conversations() {
     for (const f of files) {
       const url = await uploadToSupabase(f, user?.id || "anon");
       if (!url) continue;
+      const jid = normalizeForSend(selectedId);
       if (f.type.startsWith("image")) {
-        await fetch(`${WHATSAPP_API_URL}/whatsapp/send-image`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tenantId: tenant, jid: selectedId, url }) });
+        await fetch(`${WHATSAPP_API_URL}/whatsapp/send-image`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tenantId: tenant, jid, url }) });
       } else if (f.type.startsWith("video")) {
-        await fetch(`${WHATSAPP_API_URL}/whatsapp/send-video`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tenantId: tenant, jid: selectedId, url }) });
+        await fetch(`${WHATSAPP_API_URL}/whatsapp/send-video`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tenantId: tenant, jid, url }) });
       }
     }
     setAttachOpen(false);
@@ -511,7 +512,8 @@ export default function Conversations() {
     for (const f of files) {
       const url = await uploadToSupabase(f, user?.id || "anon");
       if (!url) continue;
-      await fetch(`${WHATSAPP_API_URL}/whatsapp/send-document`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tenantId: tenant, jid: selectedId, url, fileName: f.name, mime: f.type }) });
+      const jid = normalizeForSend(selectedId);
+      await fetch(`${WHATSAPP_API_URL}/whatsapp/send-document`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tenantId: tenant, jid, url, fileName: f.name, mime: f.type }) });
     }
     setAttachOpen(false);
   }
@@ -523,7 +525,8 @@ export default function Conversations() {
     for (const f of files) {
       const url = await uploadToSupabase(f, user?.id || "anon");
       if (!url) continue;
-      await fetch(`${WHATSAPP_API_URL}/whatsapp/send-sticker`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tenantId: tenant, jid: selectedId, url }) });
+      const jid = normalizeForSend(selectedId);
+      await fetch(`${WHATSAPP_API_URL}/whatsapp/send-sticker`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tenantId: tenant, jid, url }) });
     }
     setAttachOpen(false);
   }
@@ -534,7 +537,8 @@ export default function Conversations() {
     navigator.geolocation.getCurrentPosition(async (pos) => {
       const lat = pos.coords.latitude;
       const lng = pos.coords.longitude;
-      await fetch(`${WHATSAPP_API_URL}/whatsapp/send-location`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tenantId: tenant, jid: selectedId, lat, lng }) });
+      const jid = normalizeForSend(selectedId);
+      await fetch(`${WHATSAPP_API_URL}/whatsapp/send-location`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tenantId: tenant, jid, lat, lng }) });
       setAttachOpen(false);
     }, () => {});
   }
@@ -552,7 +556,8 @@ export default function Conversations() {
     ].join("\n");
     const { data: { user } } = await supabase.auth.getUser();
     const tenant = user ? `usr-${user.id}` : "default";
-    await fetch(`${WHATSAPP_API_URL}/whatsapp/send-contact`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tenantId: tenant, jid: selectedId, vcard, displayName: name }) });
+    const jid = normalizeForSend(selectedId);
+    await fetch(`${WHATSAPP_API_URL}/whatsapp/send-contact`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tenantId: tenant, jid, vcard, displayName: name }) });
     setAttachOpen(false);
   }
 
@@ -564,6 +569,18 @@ export default function Conversations() {
   }
   function extractPhone(jid: string) {
     return (jid || "").replace(/@.*$/, "");
+  }
+  function normalizePhoneDigits(input: string) {
+    let p = String(input || "");
+    p = p.replace(/[^\d]/g, "");
+    if (p.startsWith("55") && p.length >= 12 && p.charAt(2) === "0") {
+      p = "55" + p.slice(3);
+    }
+    return p;
+  }
+  function normalizeForSend(jidOrPhone: string) {
+    const phone = normalizePhoneDigits(extractPhone(jidOrPhone));
+    return `${phone}@s.whatsapp.net`;
   }
 
   function blobToDataURL(blob: Blob): Promise<string> {
@@ -786,6 +803,8 @@ export default function Conversations() {
                   const imageUrl = m.message?.imageMessage?.url;
                   const audioUrl = m.message?.audioMessage?.url || (m.message?.documentMessage?.mimetype?.startsWith("audio") ? m.message?.documentMessage?.url : null);
                   const videoUrl = m.message?.videoMessage?.url;
+                  const docUrl = m.message?.documentMessage?.url;
+                  const docName = (m.message as any)?.documentMessage?.fileName || (docUrl ? docUrl.split("/").pop() : "");
                   if (!text && !imageUrl && !audioUrl && !videoUrl) return null;
                   return (
                     <div key={idx} style={{ display: "flex", justifyContent: fromMe ? "flex-end" : "flex-start", marginBottom: 10 }}>
@@ -804,6 +823,12 @@ export default function Conversations() {
                         {imageUrl && <img src={imageUrl} alt="" style={{ maxWidth: "100%", borderRadius: 8, marginTop: 6 }} />}
                         {audioUrl && <audio controls src={audioUrl} style={{ width: "100%", marginTop: 6 }} />}
                         {videoUrl && <video controls src={videoUrl} style={{ width: "100%", marginTop: 6, borderRadius: 8 }} />}
+                        {docUrl && (
+                          <a href={docUrl} target="_blank" rel="noreferrer" style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 6, textDecoration: "none", color: "#111b21" }}>
+                            <span style={{ fontSize: 18 }}>📄</span>
+                            <span style={{ fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{docName || "Documento"}</span>
+                          </a>
+                        )}
                         <div style={{ fontSize: 11, color: "#667781", textAlign: "right", marginTop: 4, float: "right", marginLeft: 10 }}>
                           {new Date((m.messageTimestamp || Date.now() / 1000) * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                         </div>
