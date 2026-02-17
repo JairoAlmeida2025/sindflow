@@ -44,7 +44,7 @@ export default function Conexao() {
     setError(null);
     setQrDataUrl(null);
     if (!valid) {
-      setError("Informe um nome de conexão válido (apenas letras minúsculas, sem traços,pontos oui espaço. Ex: joao).");
+      setError("Informe um nome de conexão válido (apenas letras minúsculas e números, sem traços, pontos ou espaço).");
       return;
     }
 
@@ -68,12 +68,24 @@ export default function Conexao() {
         })
       });
 
-      const rawText = await res.text();
+      const ct = res.headers.get("content-type") || "";
       let payload: any = null;
-      try {
-        payload = JSON.parse(rawText);
-      } catch {
-        payload = rawText;
+      if (ct.includes("application/json")) {
+        try {
+          payload = await res.json();
+        } catch {
+          const rawText = await res.text();
+          try { payload = JSON.parse(rawText); } catch { payload = rawText; }
+        }
+      } else {
+        const rawText = await res.text();
+        // Se parecer JSON, tentar parsear
+        const looksJson = /^[\[{]/.test(rawText.trim());
+        if (looksJson) {
+          try { payload = JSON.parse(rawText); } catch { payload = rawText; }
+        } else {
+          payload = rawText;
+        }
       }
 
       if (!res.ok) {

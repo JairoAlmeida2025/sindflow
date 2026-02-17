@@ -17,7 +17,6 @@ import Knowledge from "./pages/client/Knowledge";
 import Contacts from "./pages/client/Contacts";
 import Notes from "./pages/client/Notes";
 import AccountSettings from "./pages/client/AccountSettings";
-import WhatsappConnect from "./pages/client/WhatsappConnect";
 import Conexao from "./pages/client/Conexao";
 import MasterLogin from "./pages/master/MasterLogin";
 import MasterDashboard from "./pages/master/MasterDashboard";
@@ -29,7 +28,6 @@ import MasterPayments from "./pages/master/MasterPayments";
 import MasterProfile from "./pages/master/MasterProfile";
 import EnvWarning from "./components/EnvWarning";
 import MasterConversations from "./pages/master/MasterConversations";
-import MasterWhatsapp from "./pages/master/MasterWhatsapp";
 
 const root = createRoot(document.getElementById("root")!);
 
@@ -57,7 +55,6 @@ root.render(
           <Route path="contatos" element={<Contacts />} />
           <Route path="anotacoes" element={<Notes />} />
           <Route path="configuracoes" element={<AccountSettings />} />
-          <Route path="whatsapp" element={<WhatsappConnect />} />
           <Route path="conexao" element={<Conexao />} />
           <Route index element={<Navigate to="conversas" replace />} />
         </Route>
@@ -77,7 +74,6 @@ root.render(
            <Route path="pagamentos" element={<MasterPayments />} />
            <Route path="apis" element={<MasterApis />} />
            <Route path="perfil" element={<MasterProfile />} />
-           <Route path="whatsapp" element={<MasterWhatsapp />} />
            <Route index element={<Navigate to="conversas" replace />} />
         </Route>
         
