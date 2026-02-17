@@ -50,9 +50,24 @@ export default function Conexao() {
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
         setUserId(user.id);
-        // Tentar buscar sessão existente para esse usuário? 
-        // Por enquanto, vamos deixar o usuário digitar o nome, 
-        // mas idealmente poderíamos listar as sessões do usuário.
+
+        // Buscar última sessão ativa ou gerando QR
+        const { data: session } = await supabase
+          .from("whatsapp_sessions")
+          .select("session_id, status")
+          .eq("user_id", user.id)
+          .neq("status", "closed") // Tudo que não for closed (open, connected, qrcode_generating)
+          .order("updated_at", { ascending: false }) // Pegar o mais recente
+          .limit(1)
+          .single();
+
+        if (session) {
+          setActiveSessionId(session.session_id);
+          setStatus(session.status);
+          // Se status for qrcode_generating, o QR pode ter expirado ou precisa ser gerado de novo?
+          // O realtime vai atualizar se mudar. Se travar, o usuário pode clicar em "Limpar".
+          // Se for 'open', já mostra conectado.
+        }
       }
     }
     init();
@@ -92,6 +107,7 @@ export default function Conexao() {
   async function submit() {
     setError(null);
     setQrDataUrl(null);
+    setStatus(null);
     if (!userId) {
       setError("Usuário não identificado. Recarregue a página.");
       return;
@@ -101,7 +117,6 @@ export default function Conexao() {
     const startedAt = Date.now();
 
     try {
-      console.log("Starting Supabase queries...");
       // 0. Gerar Nome Sequencial
       // Buscar sessões que começam com o nome base para encontrar o próximo índice
       let finalName = `${normalizedInput}_001`; // Padrão
@@ -128,7 +143,6 @@ export default function Conexao() {
       }
 
       setActiveSessionId(finalName);
-      console.log("Gerando para:", finalName);
 
       // 1. Criar/Atualizar registro no Supabase
       const { data: existing } = await supabase
@@ -150,8 +164,6 @@ export default function Conexao() {
           status: "qrcode_generating"
         });
       }
-
-      console.log("Supabase operations done. Calling webhook with:", finalName);
 
       // 2. Chamar Webhook n8n
       const res = await fetch(WEBHOOK_GERADOR, {
