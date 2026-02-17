@@ -1,7 +1,6 @@
 import { useMemo, useState } from "react";
-import { WHATSAPP_API_URL } from "../../lib/config";
 
-const WEBHOOK_URL = `${WHATSAPP_API_URL}/n8n/gerador`;
+const WEBHOOK_URL = "https://editor-n8n.automacoesai.com/webhook/gerador";
 
 function normalizeConnectionName(input: string) {
   let v = String(input || "").trim().toLowerCase();
@@ -82,6 +81,19 @@ export default function Conexao() {
         } else {
           setError(`Falha ao gerar QRCode (HTTP ${res.status}).`);
         }
+        return;
+      }
+
+      const data = payload;
+      const qr = Array.isArray(data) ? data[0]?.base64 : data?.base64;
+      if (qr && typeof qr === "string") {
+        setQrDataUrl(qr.startsWith("data:image/") ? qr : `data:image/png;base64,${qr}`);
+        try {
+          const raw = localStorage.getItem("sf_connections");
+          const list = raw ? (JSON.parse(raw) as string[]) : [];
+          const next = Array.isArray(list) ? Array.from(new Set([...list, normalizedName])) : [normalizedName];
+          localStorage.setItem("sf_connections", JSON.stringify(next));
+        } catch {}
         return;
       }
 
