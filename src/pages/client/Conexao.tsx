@@ -3,6 +3,7 @@ import { supabase } from "../../lib/supabase";
 
 const WEBHOOK_GERADOR = "https://editor-n8n.automacoesai.com/webhook/gerador";
 const WEBHOOK_DESCONECTAR = "https://editor-n8n.automacoesai.com/webhook/desconectar";
+const WEBHOOK_RECONECTAR = "https://editor-n8n.automacoesai.com/webhook/reconectar";
 
 function normalizeConnectionName(input: string) {
   let v = String(input || "").trim().toLowerCase();
@@ -40,6 +41,7 @@ export default function Conexao() {
   const [status, setStatus] = useState<string | null>(null); // 'open', 'close', 'qrcode_generated', etc.
   const [userId, setUserId] = useState<string | null>(null);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [disconnectMessage, setDisconnectMessage] = useState<string | null>(null);
 
   const normalizedInput = useMemo(() => normalizeConnectionName(connectionName), [connectionName]);
   const valid = normalizedInput.length > 0;
@@ -108,6 +110,8 @@ export default function Conexao() {
     setError(null);
     setQrDataUrl(null);
     setStatus(null);
+    setDisconnectMessage(null);
+
     if (!userId) {
       setError("Usuário não identificado. Recarregue a página.");
       return;
@@ -233,6 +237,7 @@ export default function Conexao() {
   async function handleDisconnect() {
     if (!userId || !activeSessionId) return;
     setLoading(true);
+    setDisconnectMessage(null);
     try {
       const payload = {
         connectionName: activeSessionId,
@@ -240,13 +245,26 @@ export default function Conexao() {
       };
       console.log("Disconnecting. Payload:", payload);
 
-      await fetch(WEBHOOK_DESCONECTAR, {
+      const res = await fetch(WEBHOOK_DESCONECTAR, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
       });
 
-      // Atualizar banco localmente para refletir desconexão imediata
+      // Tentar ler a resposta para pegar a mensagem "Desconectado com sucesso"
+      // Exemplo resposta: [{"session_id": "...", "status": "close", "mensagem": "Desconectado com sucesso"}]
+      let data: any = null;
+      try { data = await res.json(); } catch { }
+
+      if (Array.isArray(data) && data[0]?.mensagem) {
+        setDisconnectMessage(data[0].mensagem);
+      } else if (data?.mensagem) {
+        setDisconnectMessage(data.mensagem);
+      } else {
+        setDisconnectMessage("Instância desconectada.");
+      }
+
+      // Atualizar banco localmente
       const { data: existing } = await supabase
         .from("whatsapp_sessions")
         .select("id")
@@ -260,12 +278,92 @@ export default function Conexao() {
 
       setStatus("closed");
       setQrDataUrl(null);
-      // Mantemos o nome da conexão escrito, mas limpamos a sessão ativa?
-      // Ou deixamos o activeSessionId até ele limpar?
-      // Vamos limpar para permitir gerar novo.
-      setActiveSessionId(null);
     } catch (e) {
       setError("Erro ao desconectar.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleReconnect() {
+    if (!userId || !activeSessionId) return;
+    // Lógica similar ao submit, mas chamando reconectar e mantendo o ID
+    setLoading(true);
+    setError(null);
+    setQrDataUrl(null);
+    setDisconnectMessage(null);
+    setStatus("reconnecting"); // Estado transitorio
+
+    try {
+      // Atualizar status no banco para indicar tentativa
+      const { data: existing } = await supabase
+        .from("whatsapp_sessions")
+        .select("id")
+        .eq("user_id", userId)
+        .eq("session_id", activeSessionId)
+        .single();
+
+      if (existing) {
+        await supabase.from("whatsapp_sessions").update({
+          status: "qrcode_generating",
+          updated_at: new Date().toISOString()
+        }).eq("id", existing.id);
+      }
+
+      const res = await fetch(WEBHOOK_RECONECTAR, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          connectionName: activeSessionId,
+          userId: userId
+        })
+      });
+
+      // Processar retorno (QR Code esperado)
+      const ct = res.headers.get("content-type") || "";
+      let payload: any = null;
+      if (ct.includes("application/json")) {
+        try { payload = await res.json(); } catch {
+          const txt = await res.text(); try { payload = JSON.parse(txt); } catch { payload = txt; }
+        }
+      } else {
+        const txt = await res.text();
+        try { payload = JSON.parse(txt); } catch { payload = txt; }
+      }
+
+      if (!res.ok) {
+        setError("Erro ao reconectar.");
+        return;
+      }
+
+      // Extrair QR (mesma lógica do submit)
+      const qr = Array.isArray(payload) ? (payload[0]?.qrcode || payload[0]?.base64) : (payload?.qrcode || payload?.base64);
+      const dataUrl = typeof payload === "string" && !qr ? null : buildQrDataUrl(payload); // Se payload for string direta?
+
+      let finalQr = null;
+      if (qr && typeof qr === "string") {
+        finalQr = qr.startsWith("data:image/") ? qr : `data:image/png;base64,${qr}`;
+      } else if (dataUrl) {
+        finalQr = dataUrl;
+      } else if (typeof payload === "string" && payload.trim()) {
+        // as vezes retorna string direta
+        const s = payload.trim();
+        if (s.startsWith("data:image/")) finalQr = s;
+        else finalQr = `data:image/png;base64,${s}`;
+      }
+
+      if (finalQr) {
+        setQrDataUrl(finalQr);
+        setStatus("qrcode_generated");
+      } else {
+        // Se não veio QR, talvez já conectou direto? 
+        // Vamos assumir que se não veio erro, e não veio QR, pode ser que precise esperar realtime.
+        setError("Não foi possível obter o QR Code de reconexão. Verifique o status.");
+      }
+
+    } catch (e) {
+      console.error(e);
+      setError("Falha na reconexão.");
     } finally {
       setLoading(false);
     }
@@ -305,7 +403,7 @@ export default function Conexao() {
                 value={connectionName}
                 onChange={(e) => setConnectionName(e.target.value)}
                 placeholder="ex.: vendas01"
-                disabled={loading || isConnected}
+                disabled={loading || isConnected || !!activeSessionId}
                 style={{ width: "100%", height: 42, borderRadius: 10, border: "1px solid #d1d7db", padding: "0 12px", outline: "none", fontSize: 14 }}
               />
               <div style={{ fontSize: 12, color: "#667781", marginTop: 6 }}>
@@ -315,7 +413,8 @@ export default function Conexao() {
             </div>
 
             <div style={{ display: "flex", gap: 10 }}>
-              {!isConnected ? (
+              {!activeSessionId ? (
+                // Modo Nova Conexão
                 <>
                   <button
                     onClick={submit}
@@ -326,14 +425,15 @@ export default function Conexao() {
                     {loading ? "Processando…" : "Gerar QRCode"}
                   </button>
                   <button
-                    onClick={() => { setConnectionName(""); setQrDataUrl(null); setError(null); setStatus(null); setActiveSessionId(null); }}
+                    onClick={() => { setConnectionName(""); setQrDataUrl(null); setError(null); setStatus(null); setActiveSessionId(null); setDisconnectMessage(null); }}
                     disabled={loading}
                     style={{ padding: "10px 14px", borderRadius: 10, background: "#e9edef", color: "#111b21", border: "none", cursor: "pointer" }}
                   >
                     Limpar
                   </button>
                 </>
-              ) : (
+              ) : isConnected ? (
+                // Modo Conectado
                 <button
                   onClick={handleDisconnect}
                   disabled={loading}
@@ -341,8 +441,30 @@ export default function Conexao() {
                 >
                   {loading ? "Desconectando..." : "Desconectar Instância"}
                 </button>
-              )}
+              ) : (
+                // Modo Desconectado ou QR Gerado (com Session ID Ativo)
+                // Se status for 'closed', mostrar Reconectar e Limpar
+                // Se status for 'qrcode_generating' ou 'qrcode_generated', mostrar Limpar (ele já vê o QR)
+                <>
+                  {status === 'closed' && (
+                    <button
+                      onClick={handleReconnect}
+                      disabled={loading}
+                      style={{ padding: "10px 14px", borderRadius: 10, background: "#008069", color: "#fff", border: "none", cursor: loading ? "wait" : "pointer" }}
+                    >
+                      {loading ? "Reconectando..." : "Reconectar"}
+                    </button>
+                  )}
 
+                  <button
+                    onClick={() => { setConnectionName(""); setQrDataUrl(null); setError(null); setStatus(null); setActiveSessionId(null); setDisconnectMessage(null); }}
+                    disabled={loading}
+                    style={{ padding: "10px 14px", borderRadius: 10, background: "#e9edef", color: "#111b21", border: "none", cursor: "pointer" }}
+                  >
+                    Nova Conexão
+                  </button>
+                </>
+              )}
             </div>
           </div>
         </section>
@@ -369,6 +491,23 @@ export default function Conexao() {
                 <p style={{ margin: "8px 0 0 0", color: "#667781", fontSize: 14 }}>
                   Sua instância <b>{activeSessionId}</b> está ativa e pronta para uso.
                 </p>
+              </div>
+            ) : disconnectMessage ? (
+              <div style={{ textAlign: "center", animation: "fadeIn 0.5s ease" }}>
+                <div style={{
+                  width: 100, height: 100, background: "#fee2e2", borderRadius: "50%",
+                  display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px auto"
+                }}>
+                  <svg width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="#991b1b" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                  </svg>
+                </div>
+                <h3 style={{ margin: 0, color: "#991b1b", fontSize: 20 }}>Desconectado</h3>
+                <p style={{ margin: "8px 0 0 0", color: "#667781", fontSize: 14 }}>
+                  {disconnectMessage}
+                </p>
+                <p style={{ marginTop: 12, fontSize: 13, color: "#667781" }}>Clique em <b>Reconectar</b> ao lado para gerar um novo QR Code.</p>
               </div>
             ) : qrDataUrl ? (
               <div style={{ display: "grid", gap: 10, justifyItems: "center", animation: "fadeIn 0.5s ease" }}>
