@@ -143,7 +143,7 @@ export default function Conexao() {
   async function handleDeleteInstance() {
     if (!userId || !activeSessionId) return;
 
-    if (!confirm("⚠️ ATENÇÃO: Isso deletará permanentemente a instância do WhatsApp na Evolution API e no banco de dados. Deseja continuar?")) {
+    if (!confirm("⚠️ ATENÇÃO: Isso deletará permanentemente a instância do WhatsApp. Deseja continuar?")) {
       return;
     }
 
@@ -657,7 +657,7 @@ export default function Conexao() {
                 <p style={{ margin: "8px 0 0 0", color: "#667781", fontSize: 14 }}>
                   {disconnectMessage}
                 </p>
-                <p style={{ marginTop: 12, fontSize: 13, color: "#667781" }}>Clique em <b>Reconectar</b> ao lado para gerar um novo QR Code.</p>
+                <p style={{ marginTop: 12, fontSize: 13, color: "#667781" }}>Clique em <b>Gerar QRCode</b> ao lado para gerar um novo QR Code.</p>
               </div>
             ) : qrDataUrl ? (
               <div style={{ display: "grid", gap: 10, justifyItems: "center", animation: "fadeIn 0.5s ease" }}>
