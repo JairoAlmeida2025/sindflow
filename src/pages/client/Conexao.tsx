@@ -44,7 +44,7 @@ export default function Conexao() {
     setError(null);
     setQrDataUrl(null);
     if (!valid) {
-      setError("Informe um nome de conexão válido (apenas letras minúsculas e números, sem traços ou pontos).");
+      setError("Informe um nome de conexão válido (apenas letras minúsculas, sem traços,pontos oui espaço. Ex: joao).");
       return;
     }
 
@@ -86,8 +86,8 @@ export default function Conexao() {
       }
 
       const elapsed = Date.now() - startedAt;
-      if (elapsed < 5000) {
-        await new Promise((r) => setTimeout(r, 5000 - elapsed));
+      if (elapsed < 10000) {
+        await new Promise((r) => setTimeout(r, 10000 - elapsed));
       }
 
       const data = payload;
