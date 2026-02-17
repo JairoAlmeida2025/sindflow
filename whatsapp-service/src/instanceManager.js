@@ -113,6 +113,15 @@ export async function createOrGetInstance(tenantId, wsNotify) {
       });
     }
   });
+  sock.ev.on("messages.set", (payload) => {
+    if (wsNotify) wsNotify(tenantId, { type: "messages_set", payload });
+  });
+  sock.ev.on("chats.set", (payload) => {
+    if (wsNotify) wsNotify(tenantId, { type: "chats_set", payload });
+  });
+  sock.ev.on("contacts.set", (payload) => {
+    if (wsNotify) wsNotify(tenantId, { type: "contacts_set", payload });
+  });
   
   sock.ev.on("chats.update", (updates) => {
     if (wsNotify) wsNotify(tenantId, { type: "chat_update", payload: updates });

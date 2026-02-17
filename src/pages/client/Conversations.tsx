@@ -36,6 +36,14 @@ export default function Conversations() {
   const [isRecording, setIsRecording] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordChunksRef = useRef<BlobPart[]>([]);
+  const [recording, setRecording] = useState<"idle" | "recording" | "review">("idle");
+  const [recordTime, setRecordTime] = useState(0);
+  const [recordDataUrl, setRecordDataUrl] = useState<string | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const [levels, setLevels] = useState<number[]>([]);
+  const recordTimerRef = useRef<number | null>(null);
+  const firstHistoryLoadedRef = useRef(false);
+  const [contextMenu, setContextMenu] = useState<{ open: boolean; x: number; y: number; chatId: string | null }>({ open: false, x: 0, y: 0, chatId: null });
 
   useEffect(() => {
     (async () => {
@@ -61,7 +69,7 @@ export default function Conversations() {
             // Better: use the view or just fetch last message
             return {
               id: normalizeJid(c.contact?.wa_number || ""),
-              name: c.contact?.name || c.contact?.wa_number || "Desconhecido",
+              name: c.contact?.name || extractPhone(c.contact?.wa_number || ""),
               last: lastMsg?.text || "",
               time: c.last_message_at ? new Date(c.last_message_at).toLocaleTimeString().slice(0, 5) : "",
               auto: false
@@ -128,16 +136,63 @@ export default function Conversations() {
           
           if (msg.type === "history") {
             const { contacts, chats, messages: histMessages } = msg.payload;
-            // Processar histórico inicial
-            // TODO: Implementar lógica mais robusta de merge
-            // Por enquanto, apenas adiciona mensagens se não existirem
-            setMessages(prev => {
-              const existingIds = new Set(prev.map(m => m.key.id));
-              const newMsgs = histMessages.filter((m: any) => !existingIds.has(m.key.id));
-              return [...prev, ...newMsgs];
-            });
-            // Atualizar chats baseado no histórico
-             // Simplificação: Criar chats a partir das mensagens recentes ou lista de chats
+            const normalizedMsgs = (histMessages || []).map((m: any) => ({
+              ...m,
+              key: { ...m.key, remoteJid: normalizeJid(m.key?.remoteJid || "") }
+            }));
+            const normalizedChats = (chats || []).map((c: any) => ({
+              id: normalizeJid(c.id),
+              name: c.name || c.subject || extractPhone(c.id),
+              last: "",
+              time: "",
+              auto: false
+            }));
+            if (!firstHistoryLoadedRef.current) {
+              setMessages(normalizedMsgs);
+              setChats(prev => {
+                // merge com prev para manter itens existentes
+                const map = new Map(prev.map(p => [p.id, p]));
+                for (const c of normalizedChats) map.set(c.id, { ...(map.get(c.id) || c), name: c.name });
+                return Array.from(map.values());
+              });
+              firstHistoryLoadedRef.current = true;
+            } else {
+              setMessages(prev => {
+                const existing = new Set(prev.map(m => m.key.id));
+                const add = normalizedMsgs.filter((m: any) => !existing.has(m.key.id));
+                return [...prev, ...add];
+              });
+              setChats(prev => {
+                const map = new Map(prev.map(p => [p.id, p]));
+                for (const c of normalizedChats) map.set(c.id, { ...(map.get(c.id) || c), name: c.name });
+                return Array.from(map.values());
+              });
+            }
+          }
+          if (msg.type === "messages_set") {
+            const arr = (msg.payload?.messages || []).map((m: any) => ({
+              ...m,
+              key: { ...m.key, remoteJid: normalizeJid(m.key?.remoteJid || "") }
+            }));
+            setMessages(arr);
+          }
+          if (msg.type === "chats_set") {
+            const arr = (msg.payload?.chats || []).map((c: any) => ({
+              id: normalizeJid(c.id),
+              name: c.name || c.subject || extractPhone(c.id),
+              last: "",
+              time: "",
+              auto: false
+            }));
+            setChats(arr);
+          }
+          if (msg.type === "contacts_set") {
+            const arr = msg.payload?.contacts || [];
+            setChats(prev => prev.map(c => {
+              const up = arr.find((u: any) => normalizeJid(u.id) === c.id);
+              if (!up) return c;
+              return { ...c, name: up.name || up.notify || c.name };
+            }));
           }
 
           if (msg.type === "messages") {
@@ -294,7 +349,7 @@ export default function Conversations() {
   }
 
   async function startRecording() {
-    if (isRecording) return;
+    if (recording === "recording") return;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const mr = new MediaRecorder(stream, { mimeType: "audio/webm" });
@@ -305,22 +360,84 @@ export default function Conversations() {
       mr.onstop = async () => {
         const blob = new Blob(recordChunksRef.current, { type: "audio/webm" });
         const dataUrl = await blobToDataURL(blob);
-        await sendAudio(dataUrl);
+        setRecordDataUrl(dataUrl);
+        setRecording("review");
         stream.getTracks().forEach(t => t.stop());
       };
       mediaRecorderRef.current = mr;
       mr.start();
-      setIsRecording(true);
+      setRecording("recording");
+      setRecordTime(0);
+      recordTimerRef.current = window.setInterval(() => setRecordTime(t => t + 1), 1000);
+      // waveform
+      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const source = ctx.createMediaStreamSource(stream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 256;
+      source.connect(analyser);
+      analyserRef.current = analyser;
+      const buf = new Uint8Array(analyser.frequencyBinCount);
+      const loop = () => {
+        if (recording !== "recording") return;
+        analyser.getByteFrequencyData(buf);
+        const avg = buf.reduce((a, b) => a + b, 0) / buf.length;
+        setLevels(prev => {
+          const next = [...prev, avg];
+          return next.slice(-50);
+        });
+        requestAnimationFrame(loop);
+      };
+      requestAnimationFrame(loop);
     } catch (err) {
       console.error("Falha ao iniciar gravação:", err);
     }
   }
 
   async function stopRecording() {
-    if (!isRecording) return;
-    setIsRecording(false);
+    if (recording !== "recording") return;
+    setRecording("review");
     try {
       mediaRecorderRef.current?.stop();
+      if (recordTimerRef.current) {
+        clearInterval(recordTimerRef.current);
+        recordTimerRef.current = null;
+      }
+    } catch {}
+  }
+  async function pauseRecording() {
+    if (recording !== "recording") return;
+    try {
+      mediaRecorderRef.current?.pause();
+      setRecording("paused" as any);
+      if (recordTimerRef.current) {
+        clearInterval(recordTimerRef.current);
+        recordTimerRef.current = null;
+      }
+    } catch {}
+  }
+  async function resumeRecording() {
+    if (recording !== "paused") return;
+    try {
+      mediaRecorderRef.current?.resume();
+      setRecording("recording");
+      if (!recordTimerRef.current) {
+        recordTimerRef.current = window.setInterval(() => setRecordTime(t => t + 1), 1000);
+      }
+      // reinicia loop de waveform
+      const loop = () => {
+        if (recording !== "recording") return;
+        const analyser = analyserRef.current;
+        if (!analyser) return;
+        const buf = new Uint8Array(analyser.frequencyBinCount);
+        analyser.getByteFrequencyData(buf);
+        const avg = buf.reduce((a, b) => a + b, 0) / buf.length;
+        setLevels(prev => {
+          const next = [...prev, avg];
+          return next.slice(-50);
+        });
+        requestAnimationFrame(loop);
+      };
+      requestAnimationFrame(loop);
     } catch {}
   }
 
@@ -334,7 +451,11 @@ export default function Conversations() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ tenantId: tenant, jid: selectedId, dataUrl, ptt: true })
       });
-      playSend();
+      audioSend.current?.play().catch(() => {});
+      setRecording("idle");
+      setRecordDataUrl(null);
+      setLevels([]);
+      setRecordTime(0);
     } catch (err) {
       console.error("Falha ao enviar áudio:", err);
     }
@@ -345,6 +466,9 @@ export default function Conversations() {
     if (jid.endsWith("@lid")) return jid.replace("@lid", "@s.whatsapp.net");
     if (jid.endsWith("@c.us")) return jid.replace("@c.us", "@s.whatsapp.net");
     return jid;
+  }
+  function extractPhone(jid: string) {
+    return (jid || "").replace(/@.*$/, "");
   }
 
   function blobToDataURL(blob: Blob): Promise<string> {
@@ -385,6 +509,13 @@ export default function Conversations() {
             <div 
               key={c.id} 
               onClick={() => setSelectedId(c.id)} 
+              onContextMenu={(e) => {
+                e.preventDefault();
+                const bounds = (e.currentTarget.closest("aside") as HTMLElement)?.getBoundingClientRect();
+                const offsetX = e.clientX - (bounds?.left || 0);
+                const offsetY = e.clientY - (bounds?.top || 0);
+                setContextMenu({ open: true, x: offsetX, y: offsetY, chatId: c.id });
+              }}
               style={{ 
                 display: "flex", 
                 alignItems: "center", 
@@ -411,6 +542,57 @@ export default function Conversations() {
             </div>
           ))}
           {filtered.length === 0 && <div style={{ padding: 20, textAlign: "center", color: "#667781" }}>Nenhuma conversa encontrada</div>}
+          {contextMenu.open && (
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                position: "absolute",
+                left: contextMenu.x,
+                top: contextMenu.y,
+                background: "#fff",
+                border: "1px solid #d1d7db",
+                borderRadius: 8,
+                boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
+                padding: 6,
+                zIndex: 9999,
+                minWidth: 220
+              }}
+            >
+              <button
+                onClick={() => { if (contextMenu.chatId) setSelectedId(contextMenu.chatId); setContextMenu({ open: false, x: 0, y: 0, chatId: null }); }}
+                style={{ width: "100%", textAlign: "left", padding: "8px 10px", border: "none", background: "transparent", cursor: "pointer" }}
+              >
+                Abrir conversa
+              </button>
+              <button
+                onClick={async () => {
+                  try {
+                    const { data: { user } } = await supabase.auth.getUser();
+                    const chatId = contextMenu.chatId;
+                    if (!user || !chatId) return;
+                    const { data: contact } = await supabase.from("contacts").select("id").eq("user_id", user.id).eq("wa_number", chatId).single();
+                    if (contact?.id) {
+                      const { data: conv } = await supabase.from("conversations").select("id").eq("user_id", user.id).eq("contact_id", contact.id).single();
+                      if (conv?.id) {
+                        await supabase.from("messages").delete().eq("conversation_id", conv.id);
+                        await supabase.from("conversations").delete().eq("id", conv.id);
+                      }
+                    }
+                    setChats(prev => prev.filter(c => c.id !== chatId));
+                    setMessages(prev => prev.filter(m => m.key?.remoteJid !== chatId));
+                    if (selectedId === chatId) setSelectedId(null);
+                  } catch (err) {
+                    console.error("Falha ao excluir conversa:", err);
+                  } finally {
+                    setContextMenu({ open: false, x: 0, y: 0, chatId: null });
+                  }
+                }}
+                style={{ width: "100%", textAlign: "left", padding: "8px 10px", border: "none", background: "transparent", cursor: "pointer", color: "#ef4444" }}
+              >
+                Excluir conversa
+              </button>
+            </div>
+          )}
         </div>
       </aside>
 
@@ -475,52 +657,63 @@ export default function Conversations() {
             </div>
 
             {/* Input de Mensagem */}
-            <footer style={{ padding: "10px 16px", background: "#f0f2f5", display: "flex", alignItems: "center", gap: 10 }}>
+            <footer style={{ padding: "10px 16px", background: "#f0f2f5", display: "flex", alignItems: "center", gap: 10, position: "relative", zIndex: 1 }}>
               <span style={{ fontSize: 24, color: "#54656f", cursor: "pointer" }}>😊</span>
               <span style={{ fontSize: 24, color: "#54656f", cursor: "pointer" }}>＋</span>
-              <input 
-                value={input} 
-                onChange={e => setInput(e.target.value)} 
-                onKeyDown={e => e.key === "Enter" && sendMessage()}
-                placeholder="Digite uma mensagem" 
-                style={{ flex: 1, padding: "9px 12px", borderRadius: 8, border: "none", outline: "none", fontSize: 15 }} 
-              />
-              {input ? (
-                <button onClick={sendMessage} className="btn-primary" style={{ padding: "8px 16px" }}>➤</button>
-              ) : (
-                <button onMouseDown={startRecording} onMouseUp={stopRecording} onTouchStart={startRecording} onTouchEnd={stopRecording} style={{ padding: "8px 12px" }}>
-                  {isRecording ? "Gravando..." : "🎤"}
-                </button>
+              {recording === "idle" && (
+                <>
+                  <input 
+                    value={input} 
+                    onChange={e => setInput(e.target.value)} 
+                    onKeyDown={e => e.key === "Enter" && sendMessage()}
+                    placeholder="Digite uma mensagem" 
+                    style={{ flex: 1, padding: "9px 12px", borderRadius: 8, border: "none", outline: "none", fontSize: 15 }} 
+                  />
+                  {input ? (
+                    <button onClick={sendMessage} className="btn-primary" style={{ padding: "8px 16px" }}>➤</button>
+                  ) : (
+                    <button onClick={startRecording} style={{ padding: "8px 12px" }}>🎤</button>
+                  )}
+                </>
               )}
-              {selectedId && (
-                <button
-                  onClick={async () => {
-                    try {
-                      const { data: { user } } = await supabase.auth.getUser();
-                      const { data: conv } = await supabase
-                        .from("conversations")
-                        .select("id")
-                        .eq("user_id", user?.id)
-                        .eq("contact_id", (
-                          await supabase.from("contacts").select("id").eq("user_id", user?.id).eq("wa_number", selectedId).single()
-                        ).data?.id)
-                        .single();
-                      if (conv?.id) {
-                        await supabase.from("messages").delete().eq("conversation_id", conv.id);
-                        await supabase.from("conversations").delete().eq("id", conv.id);
-                      }
-                      setChats(prev => prev.filter(c => c.id !== selectedId));
-                      setMessages(prev => prev.filter(m => m.key?.remoteJid !== selectedId));
-                      setSelectedId(null);
-                    } catch (err) {
-                      console.error("Falha ao excluir conversa:", err);
-                    }
-                  }}
-                  className="btn-secondary"
-                  style={{ padding: "8px 12px" }}
-                >
-                  Excluir conversa
-                </button>
+              {recording === "recording" && (
+                <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 12 }}>
+                  <span style={{ color: "#ef4444" }}>●</span>
+                  <span style={{ width: 60, textAlign: "center" }}>
+                    {String(Math.floor(recordTime / 60)).padStart(2, "0")}:
+                    {String(recordTime % 60).padStart(2, "0")}
+                  </span>
+                  <div style={{ display: "flex", gap: 2, alignItems: "flex-end", flex: 1, height: 24 }}>
+                    {levels.map((l, i) => (
+                      <div key={i} style={{ width: 2, height: Math.max(4, Math.min(24, (l / 255) * 24)), background: "#4b5563", borderRadius: 1 }} />
+                    ))}
+                  </div>
+                  <button onClick={pauseRecording} className="btn-secondary" style={{ padding: "6px 10px" }}>Pausar</button>
+                  <button onClick={stopRecording} className="btn-secondary" style={{ padding: "6px 10px" }}>Stop</button>
+                </div>
+              )}
+              {recording === "paused" && (
+                <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 12 }}>
+                  <span style={{ color: "#ef4444" }}>●</span>
+                  <span style={{ width: 60, textAlign: "center" }}>
+                    {String(Math.floor(recordTime / 60)).padStart(2, "0")}:
+                    {String(recordTime % 60).padStart(2, "0")}
+                  </span>
+                  <div style={{ display: "flex", gap: 2, alignItems: "flex-end", flex: 1, height: 24 }}>
+                    {levels.map((l, i) => (
+                      <div key={i} style={{ width: 2, height: Math.max(4, Math.min(24, (l / 255) * 24)), background: "#9ca3af", borderRadius: 1 }} />
+                    ))}
+                  </div>
+                  <button onClick={resumeRecording} className="btn-secondary" style={{ padding: "6px 10px" }}>Retomar</button>
+                  <button onClick={stopRecording} className="btn-secondary" style={{ padding: "6px 10px" }}>Stop</button>
+                </div>
+              )}
+              {recording === "review" && (
+                <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 12 }}>
+                  <audio controls src={recordDataUrl || undefined} style={{ flex: 1 }} />
+                  <button onClick={() => { setRecording("idle"); setRecordDataUrl(null); setLevels([]); setRecordTime(0); }} className="btn-secondary" style={{ padding: "6px 10px" }}>Descartar</button>
+                  <button onClick={() => recordDataUrl && sendAudio(recordDataUrl)} className="btn-primary" style={{ padding: "6px 12px" }}>Enviar</button>
+                </div>
               )}
             </footer>
           </>
@@ -547,6 +740,33 @@ export default function Conversations() {
              </div>
              <h2 style={{ fontSize: 22, color: "#111b21", fontWeight: 400 }}>{activeChat?.name}</h2>
              <span style={{ fontSize: 16, color: "#667781" }}>{activeChat?.id?.replace("@s.whatsapp.net", "")}</span>
+             <div style={{ display: "grid", gap: 8, width: "80%", marginTop: 12 }}>
+               <input
+                 value={activeChat?.name || ""}
+                 onChange={e => setChats(prev => prev.map(c => c.id === activeChat?.id ? { ...c, name: e.target.value } : c))}
+                 placeholder="Nome do contato"
+                 style={{ padding: "8px 10px", borderRadius: 8, border: "1px solid #ddd" }}
+               />
+               <button
+                 className="btn-primary"
+                 onClick={async () => {
+                   try {
+                     const { data: { user } } = await supabase.auth.getUser();
+                     const name = (chats.find(c => c.id === activeChat?.id)?.name || "").trim();
+                     if (!user || !activeChat?.id) return;
+                     await supabase.from("contacts").upsert({
+                       user_id: user.id,
+                       wa_number: activeChat.id,
+                       name
+                     }, { onConflict: "user_id, wa_number" });
+                   } catch (err) {
+                     console.error("Falha ao salvar contato:", err);
+                   }
+                 }}
+               >
+                 Salvar contato
+               </button>
+             </div>
           </div>
           <div style={{ padding: 16 }}>
             <div style={{ fontSize: 14, color: "#667781", marginBottom: 8 }}>Etiquetas</div>
