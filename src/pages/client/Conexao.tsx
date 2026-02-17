@@ -92,12 +92,6 @@ export default function Conexao() {
   async function submit() {
     setError(null);
     setQrDataUrl(null);
-    setStatus(null);
-
-    if (!valid) {
-      setError("Informe um nome de conexão válido (apenas letras minúsculas e números).");
-      return;
-    }
     if (!userId) {
       setError("Usuário não identificado. Recarregue a página.");
       return;
@@ -107,6 +101,7 @@ export default function Conexao() {
     const startedAt = Date.now();
 
     try {
+      console.log("Starting Supabase queries...");
       // 0. Gerar Nome Sequencial
       // Buscar sessões que começam com o nome base para encontrar o próximo índice
       let finalName = `${normalizedInput}_001`; // Padrão
@@ -155,6 +150,8 @@ export default function Conexao() {
           status: "qrcode_generating"
         });
       }
+
+      console.log("Supabase operations done. Calling webhook with:", finalName);
 
       // 2. Chamar Webhook n8n
       const res = await fetch(WEBHOOK_GERADOR, {
