@@ -102,22 +102,22 @@ export default function Conexao() {
 
   // Função para deletar sessão anterior e iniciar nova
   async function handleForceNewConnection() {
-    console.log("handleForceNewConnection: Start. UserId:", userId, "SessionId:", activeSessionId);
-    if (!userId) {
-      console.error("handleForceNewConnection: Missing userId");
-      return;
-    }
+    if (!userId) return;
+
+    // Logs detalhados para garantir que está sendo chamado
+    console.log("handleForceNewConnection: Iniciando. UserId:", userId, "SessionId:", activeSessionId);
 
     if (!confirm("Isso excluirá a conexão anterior permanentemente. Deseja continuar?")) {
-      console.log("handleForceNewConnection: Cancelled by user");
+      console.log("handleForceNewConnection: Cancelado pelo usuário.");
       return;
     }
 
     setLoading(true);
     try {
-      console.log("handleForceNewConnection: Deleting remote session...");
-      // 1. Chamar Webhook para deletar na Evolution/Backend
+      // 1. Chamar Webhook para deletar na Evolution/Backend (IMEDIATAMENTE)
       if (activeSessionId) {
+        console.log("handleForceNewConnection: Chamando webhook de deletar...", WEBHOOK_DELETAR);
+
         const res = await fetch(WEBHOOK_DELETAR, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -127,25 +127,37 @@ export default function Conexao() {
           })
         });
 
-        console.log("handleForceNewConnection: Webhook response status:", res.status);
+        console.log("handleForceNewConnection: Status do webhook:", res.status);
+
+        // Tentar parsear resposta mesmo se der erro, igual ao LOGICA DO GERADOR
+        const ct = res.headers.get("content-type") || "";
+        let payload: any = null;
+        if (ct.includes("application/json")) {
+          try { payload = await res.json(); } catch {
+            const txt = await res.text(); try { payload = JSON.parse(txt); } catch { payload = txt; }
+          }
+        } else {
+          const txt = await res.text();
+          try { payload = JSON.parse(txt); } catch { payload = txt; }
+        }
 
         if (!res.ok) {
-          // Se falhar na Evolution, NÃO deletamos localmente para evitar inconsistência
-          const txt = await res.text();
-          console.error("Falha ao deletar na Evolution:", res.status, txt);
-          throw new Error(`Falha ao deletar instância remota (${res.status}). Tente novamente.`);
+          console.error("Falha ao deletar na Evolution:", res.status, payload);
+          // Como solicitado: Se falhar na Evolution, NÃO deletamos localmente.
+          throw new Error(`Falha ao deletar instância remota (${res.status}). Verifique o console.`);
         }
-        console.log("handleForceNewConnection: Remote delete successful.");
+
+        console.log("handleForceNewConnection: Sucesso remoto.", payload);
       }
 
       // 2. Deletar todas as sessões deste usuário localmente SOMENTE SE o webhook passou
-      console.log("handleForceNewConnection: Deleting local session...");
+      console.log("handleForceNewConnection: Deletando do Supabase...");
       await supabase
         .from("whatsapp_sessions")
         .delete()
         .eq("user_id", userId);
 
-      console.log("handleForceNewConnection: Local delete successful. Resetting state.");
+      console.log("handleForceNewConnection: Sucesso local. Resetando estado.");
       setConnectionName("");
       setQrDataUrl(null);
       setError(null);
@@ -153,7 +165,7 @@ export default function Conexao() {
       setActiveSessionId(null);
       setDisconnectMessage(null);
     } catch (e: any) {
-      console.error("handleForceNewConnection: Error caught:", e);
+      console.error("handleForceNewConnection: Erro capturado:", e);
       setError(e.message || "Erro ao limpar sessão antiga.");
     } finally {
       setLoading(false);
