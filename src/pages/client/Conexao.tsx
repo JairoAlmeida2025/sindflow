@@ -421,7 +421,7 @@ export default function Conexao() {
               />
               <div style={{ fontSize: 12, color: "#667781", marginTop: 6 }}>
                 ID Base: <span style={{ fontFamily: "monospace" }}>{normalizedInput || "—"}</span>
-                {activeSessionId && <span style={{ marginLeft: 10, color: "#008069", fontWeight: 600 }}>Gerado: {activeSessionId} ({status})</span>}
+                {activeSessionId && <span style={{ marginLeft: 10, color: "#008069", fontWeight: 600 }}>Gerado: {activeSessionId}</span>}
               </div>
             </div>
 
