@@ -135,6 +135,81 @@ export default function Conexao() {
     }
   }
 
+  // Função para deletar instância permanentemente
+  async function handleDeleteInstance() {
+    if (!userId || !activeSessionId) return;
+
+    if (!confirm("⚠️ ATENÇÃO: Isso deletará permanentemente a instância do WhatsApp na Evolution API e no banco de dados. Deseja continuar?")) {
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    const startTime = Date.now();
+
+    try {
+      console.log("handleDeleteInstance: Calling WEBHOOK_DELETAR...");
+
+      // 1. Chamar WEBHOOK_DELETAR
+      const res = await fetch(WEBHOOK_DELETAR, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          connectionName: activeSessionId,
+          userId: userId
+        })
+      });
+
+      console.log("handleDeleteInstance: Webhook response status:", res.status);
+
+      // Parsear resposta
+      const ct = res.headers.get("content-type") || "";
+      let payload: any = null;
+      if (ct.includes("application/json")) {
+        try { payload = await res.json(); } catch {
+          const txt = await res.text(); try { payload = JSON.parse(txt); } catch { payload = txt; }
+        }
+      } else {
+        const txt = await res.text();
+        try { payload = JSON.parse(txt); } catch { payload = txt; }
+      }
+
+      if (!res.ok) {
+        console.error("Erro ao deletar instância:", res.status, payload);
+        throw new Error(`Falha ao deletar instância (${res.status}). Verifique o console.`);
+      }
+
+      console.log("handleDeleteInstance: Webhook success:", payload);
+
+      // 2. Garantir animação mínima de 5 segundos
+      const elapsed = Date.now() - startTime;
+      if (elapsed < 5000) {
+        await new Promise(resolve => setTimeout(resolve, 5000 - elapsed));
+      }
+
+      // 3. Deletar do Supabase
+      console.log("handleDeleteInstance: Deleting from database...");
+      await supabase
+        .from("whatsapp_sessions")
+        .delete()
+        .eq("user_id", userId);
+
+      // 4. Resetar estado
+      setConnectionName("");
+      setQrDataUrl(null);
+      setStatus(null);
+      setActiveSessionId(null);
+      setDisconnectMessage("Instância deletada com sucesso! ✅");
+
+      console.log("handleDeleteInstance: Complete!");
+    } catch (e: any) {
+      console.error("handleDeleteInstance: Error:", e);
+      setError(e.message || "Erro ao deletar instância.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
   // Se o status for 'open' ou 'connected', garantimos que o QR some
   const isConnected = status === "open" || status === "connected";
 
@@ -200,19 +275,9 @@ export default function Conexao() {
         });
       }
 
-      // 2. Verificar se usuário tem sessões antigas (para decidir qual webhook chamar)
-      const { data: allUserSessions } = await supabase
-        .from("whatsapp_sessions")
-        .select("session_id")
-        .eq("user_id", userId);
-
-      const hasOldSessions = allUserSessions && allUserSessions.length > 1; // Mais de 1 = tem sessão antiga além da nova
-
-      // 3. Chamar Webhook apropriado
-      const webhookUrl = hasOldSessions ? WEBHOOK_DELETAR : WEBHOOK_GERADOR;
-      console.log(`Calling webhook: ${hasOldSessions ? 'DELETAR' : 'GERADOR'} for ${finalName}`);
-
-      const res = await fetch(webhookUrl, {
+      // 2. Chamar WEBHOOK_GERADOR
+      console.log("Calling WEBHOOK_GERADOR for", finalName);
+      const res = await fetch(WEBHOOK_GERADOR, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -497,13 +562,22 @@ export default function Conexao() {
                 </>
               ) : isConnected ? (
                 // Modo Conectado
-                <button
-                  onClick={handleDisconnect}
-                  disabled={loading}
-                  style={{ padding: "10px 14px", borderRadius: 10, background: "#ef4444", color: "#fff", border: "none", cursor: "pointer", width: "100%" }}
-                >
-                  {loading ? "Desconectando..." : "Desconectar Instância"}
-                </button>
+                <div style={{ display: "grid", gap: 10, width: "100%" }}>
+                  <button
+                    onClick={handleDisconnect}
+                    disabled={loading}
+                    style={{ padding: "10px 14px", borderRadius: 10, background: "#ef4444", color: "#fff", border: "none", cursor: "pointer" }}
+                  >
+                    {loading ? "Desconectando..." : "Desconectar Instância"}
+                  </button>
+                  <button
+                    onClick={handleDeleteInstance}
+                    disabled={loading}
+                    style={{ padding: "10px 14px", borderRadius: 10, background: "#991b1b", color: "#fff", border: "none", cursor: "pointer" }}
+                  >
+                    {loading ? "Deletando..." : "Deletar Instância"}
+                  </button>
+                </div>
               ) : (
                 // Modo Desconectado ou QR Gerado
                 <>
