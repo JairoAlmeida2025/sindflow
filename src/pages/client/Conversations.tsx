@@ -24,9 +24,9 @@ export default function Conversations() {
 
   const [showDetails, setShowDetails] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
-  
+
   const [profilePics, setProfilePics] = useState<Record<string, string>>({});
-  
+
   // Audio feedback via WebAudio (sem arquivos)
   const audioIncoming = useRef<HTMLAudioElement | null>(null);
   const audioSend = useRef<HTMLAudioElement | null>(null);
@@ -110,23 +110,104 @@ export default function Conversations() {
       setCurrent(next);
     };
 
-    const pillBg = fromMe ? "#d9fdd3" : "#fff";
-    const accent = "#22c55e";
-    const track = "#d1d7db";
+    // WhatsApp Web colors
+    const bubbleBg = fromMe ? "#d9fdd3" : "#ffffff";
+    const iconColor = fromMe ? "#00a884" : "#00a884";
+    const waveformColor = fromMe ? "#00a884" : "#00a884";
+    const waveformBg = fromMe ? "rgba(0, 168, 132, 0.2)" : "rgba(0, 168, 132, 0.2)";
+    const timeColor = "#667781";
+
+    // Generate simple waveform bars (static for now, could be dynamic with audio analysis)
+    const waveformBars = Array.from({ length: 40 }, (_, i) => {
+      const height = 20 + Math.sin(i * 0.5) * 10 + Math.random() * 8;
+      const isPlayed = pct > i / 40;
+      return (
+        <div
+          key={i}
+          style={{
+            width: 2,
+            height: `${height}%`,
+            background: isPlayed ? waveformColor : waveformBg,
+            borderRadius: 1,
+            transition: "background 0.1s ease"
+          }}
+        />
+      );
+    });
 
     return (
-      <div style={{ marginTop: 6, width: 280, maxWidth: "100%", display: "grid", gap: 6 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, background: pillBg, borderRadius: 12 }}>
-          <button onClick={toggle} style={{ width: 36, height: 36, borderRadius: 18, border: "none", background: accent, color: "#fff", cursor: "pointer", flex: "0 0 auto" }}>
-            {playing ? "❚❚" : "▶"}
-          </button>
-          <div onClick={seek} style={{ height: 8, flex: 1, background: track, borderRadius: 999, cursor: "pointer", position: "relative", overflow: "hidden" }}>
-            <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: `${pct * 100}%`, background: accent }} />
-          </div>
-          <div style={{ fontSize: 12, color: "#667781", width: 44, textAlign: "right", flex: "0 0 auto" }}>
-            {formatTimeMMSS(duration - current)}
-          </div>
+      <div style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        padding: "6px 8px 6px 6px",
+        background: bubbleBg,
+        borderRadius: 7.5,
+        minWidth: 280,
+        maxWidth: 340
+      }}>
+        {/* Play/Pause Button */}
+        <button
+          onClick={toggle}
+          style={{
+            width: 42,
+            height: 42,
+            borderRadius: "50%",
+            border: "none",
+            background: "transparent",
+            color: iconColor,
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontSize: 24,
+            padding: 0,
+            flexShrink: 0,
+            transition: "transform 0.1s ease"
+          }}
+          onMouseDown={(e) => e.currentTarget.style.transform = "scale(0.95)"}
+          onMouseUp={(e) => e.currentTarget.style.transform = "scale(1)"}
+          onMouseLeave={(e) => e.currentTarget.style.transform = "scale(1)"}
+        >
+          {playing ? (
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z" />
+            </svg>
+          ) : (
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M8 5v14l11-7z" />
+            </svg>
+          )}
+        </button>
+
+        {/* Waveform */}
+        <div
+          onClick={seek}
+          style={{
+            flex: 1,
+            height: 32,
+            display: "flex",
+            alignItems: "center",
+            gap: 1.5,
+            cursor: "pointer",
+            padding: "0 4px"
+          }}
+        >
+          {waveformBars}
         </div>
+
+        {/* Time */}
+        <div style={{
+          fontSize: 11,
+          color: timeColor,
+          fontFamily: "system-ui, -apple-system, sans-serif",
+          minWidth: 32,
+          textAlign: "right",
+          flexShrink: 0
+        }}>
+          {formatTimeMMSS(playing ? current : duration)}
+        </div>
+
         <audio ref={audioRef} src={url} preload="metadata" style={{ display: "none" }} />
       </div>
     );
@@ -182,7 +263,7 @@ export default function Conversations() {
         // Actually, the current implementation filters `messages` state by `selectedId`.
         // So we should probably load all recent messages or change the strategy.
         // Let's load the last 50 messages globally for now to populate the view.
-        
+
         const { data: dbMessages } = await supabase
           .from("messages")
           .select(`
@@ -207,12 +288,12 @@ export default function Conversations() {
             return u ? "document" : "none";
           };
           const formattedMsgs = dbMessages.reverse().map(m => ({
-            key: { 
-              remoteJid: normalizeJid(m.conversation?.contact?.wa_number || ""), 
-              fromMe: m.from_me, 
-              id: m.id 
+            key: {
+              remoteJid: normalizeJid(m.conversation?.contact?.wa_number || ""),
+              fromMe: m.from_me,
+              id: m.id
             },
-            message: { 
+            message: {
               conversation: m.text,
               ...(inferMediaKind(m.media_url) === "image" ? { imageMessage: { url: m.media_url, caption: m.text } } : {}),
               ...(inferMediaKind(m.media_url) === "video" ? { videoMessage: { url: m.media_url } } : {}),
@@ -236,7 +317,7 @@ export default function Conversations() {
         try {
           const msg = JSON.parse(ev.data);
           if (msg.type === "qr" || msg.type === "status") return;
-          
+
           if (msg.type === "history") {
             const { contacts, chats, messages: histMessages } = msg.payload;
             const normalizedMsgs = (histMessages || []).map((m: any) => ({
@@ -300,10 +381,10 @@ export default function Conversations() {
 
           if (msg.type === "messages") {
             const newMessages = msg.payload?.messages || [];
-            
+
             // Tocar som se houver mensagem nova recebida (não enviada por mim)
             const hasIncoming = newMessages.some((m: any) => !m.key.fromMe);
-            if (hasIncoming) audioIncoming.current?.play().catch(() => {});
+            if (hasIncoming) audioIncoming.current?.play().catch(() => { });
 
             setMessages((prev) => {
               // Evitar duplicatas baseado no key.id
@@ -316,35 +397,35 @@ export default function Conversations() {
                 .filter((m: any) => !existingIds.has(m.key.id));
               return [...prev, ...uniqueNew];
             });
-            
+
             // Atualizar lista de conversas com a última mensagem
             if (newMessages.length > 0) {
               const lastMsg = newMessages[newMessages.length - 1];
               const remoteJid = normalizeJid(lastMsg.key.remoteJid);
               const text = lastMsg.message?.conversation || lastMsg.message?.extendedTextMessage?.text || "Imagem/Arquivo";
               const pushName = lastMsg.pushName || remoteJid.replace("@s.whatsapp.net", "");
-              
+
               setChats(prevChats => {
                 const existingIndex = prevChats.findIndex(c => c.id === remoteJid);
                 // Buscar foto se não tiver
                 if (!profilePics[remoteJid]) {
-                    fetch(`${WHATSAPP_API_URL}/whatsapp/profile-pic?tenantId=${tenant}&jid=${remoteJid}`)
-                      .then(r => r.json())
-                      .then(d => { if(d.ok && d.url) setProfilePics(p => ({...p, [remoteJid]: d.url})) });
+                  fetch(`${WHATSAPP_API_URL}/whatsapp/profile-pic?tenantId=${tenant}&jid=${remoteJid}`)
+                    .then(r => r.json())
+                    .then(d => { if (d.ok && d.url) setProfilePics(p => ({ ...p, [remoteJid]: d.url })) });
                 }
 
                 if (existingIndex >= 0) {
-                   const updated = [...prevChats];
-                   updated[existingIndex] = { 
-                     ...updated[existingIndex], 
-                     last: text, 
-                     time: new Date().toLocaleTimeString().slice(0, 5) 
-                   };
-                   // Move para o topo
-                   updated.unshift(updated.splice(existingIndex, 1)[0]);
-                   return updated;
+                  const updated = [...prevChats];
+                  updated[existingIndex] = {
+                    ...updated[existingIndex],
+                    last: text,
+                    time: new Date().toLocaleTimeString().slice(0, 5)
+                  };
+                  // Move para o topo
+                  updated.unshift(updated.splice(existingIndex, 1)[0]);
+                  return updated;
                 } else {
-                   return [{ id: remoteJid, name: pushName, last: text, time: new Date().toLocaleTimeString().slice(0, 5), auto: false }, ...prevChats];
+                  return [{ id: remoteJid, name: pushName, last: text, time: new Date().toLocaleTimeString().slice(0, 5), auto: false }, ...prevChats];
                 }
               });
             }
@@ -375,7 +456,7 @@ export default function Conversations() {
                 const time = map.get(id)?.time || "";
                 map.set(id, { id, name, last, time, auto: false });
               }
-              return Array.from(map.values()).sort((a,b) => (b.time || "").localeCompare(a.time || ""));
+              return Array.from(map.values()).sort((a, b) => (b.time || "").localeCompare(a.time || ""));
             });
           }
           if (msg.type === "chat_delete") {
@@ -392,7 +473,7 @@ export default function Conversations() {
               return { ...c, name: up.name || up.notify || c.name };
             }));
           }
-        } catch {}
+        } catch { }
       };
       ws.onclose = () => {
         // tenta reconectar com backoff simples
@@ -402,7 +483,7 @@ export default function Conversations() {
             w.onmessage = ws.onmessage!;
             w.onclose = ws.onclose!;
             wsRef.current = w;
-          } catch {}
+          } catch { }
         }, 1500);
       };
       wsRef.current = ws;
@@ -416,7 +497,7 @@ export default function Conversations() {
     if (!input.trim() || !selectedId) return;
     const text = input.trim();
     setInput("");
-    
+
     // Otimisticamente adicionar a mensagem na UI
     const tempId = "temp-" + Date.now();
     const optimisticMsg = {
@@ -426,12 +507,12 @@ export default function Conversations() {
       status: "sending"
     };
     setMessages(prev => [...prev, optimisticMsg]);
-    audioSend.current?.play().catch(() => {});
+    audioSend.current?.play().catch(() => { });
 
     try {
       const { data: { user } } = await supabase.auth.getUser();
       const tenant = user ? `usr-${user.id}` : "default";
-      
+
       const res = await fetch(`${WHATSAPP_API_URL}/whatsapp/send-text`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -443,19 +524,19 @@ export default function Conversations() {
         console.error("Falha ao enviar:", json || res.statusText);
         throw new Error(json?.error || "Falha ao enviar");
       }
-      
+
       // Atualizar conversa na lista lateral
       setChats(prevChats => {
         const existingIndex = prevChats.findIndex(c => c.id === selectedId);
         if (existingIndex >= 0) {
-           const updated = [...prevChats];
-           updated[existingIndex] = { 
-             ...updated[existingIndex], 
-             last: text, 
-             time: new Date().toLocaleTimeString().slice(0, 5) 
-           };
-           updated.unshift(updated.splice(existingIndex, 1)[0]);
-           return updated;
+          const updated = [...prevChats];
+          updated[existingIndex] = {
+            ...updated[existingIndex],
+            last: text,
+            time: new Date().toLocaleTimeString().slice(0, 5)
+          };
+          updated.unshift(updated.splice(existingIndex, 1)[0]);
+          return updated;
         }
         return prevChats;
       });
@@ -525,7 +606,7 @@ export default function Conversations() {
         clearInterval(recordTimerRef.current);
         recordTimerRef.current = null;
       }
-    } catch {}
+    } catch { }
   }
   async function pauseRecording() {
     if (recording !== "recording") return;
@@ -536,7 +617,7 @@ export default function Conversations() {
         clearInterval(recordTimerRef.current);
         recordTimerRef.current = null;
       }
-    } catch {}
+    } catch { }
   }
   async function resumeRecording() {
     if (recording !== "paused") return;
@@ -561,7 +642,7 @@ export default function Conversations() {
         requestAnimationFrame(loop);
       };
       requestAnimationFrame(loop);
-    } catch {}
+    } catch { }
   }
 
   async function sendAudio(dataUrl: string) {
@@ -574,7 +655,7 @@ export default function Conversations() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ tenantId: tenant, jid: normalizeJid(selectedId), dataUrl, ptt: true })
       });
-      audioSend.current?.play().catch(() => {});
+      audioSend.current?.play().catch(() => { });
       setRecording("idle");
       setRecordDataUrl(null);
       setLevels([]);
@@ -636,7 +717,7 @@ export default function Conversations() {
       const jid = normalizeJid(selectedId);
       await fetch(`${WHATSAPP_API_URL}/whatsapp/send-location`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tenantId: tenant, jid, lat, lng }) });
       setAttachOpen(false);
-    }, () => {});
+    }, () => { });
   }
   async function sendActiveContact() {
     if (!selectedId) return;
@@ -721,19 +802,19 @@ export default function Conversations() {
         <div style={{ padding: "10px 16px", background: "#f0f2f5", borderBottom: "1px solid #d1d7db" }}>
           <div style={{ background: "#fff", borderRadius: 8, padding: "8px 12px", display: "flex", alignItems: "center" }}>
             <span style={{ marginRight: 12, color: "#54656f" }}>🔍</span>
-            <input 
-              placeholder="Pesquisar ou começar uma nova conversa" 
-              value={search} 
-              onChange={e => setSearch(e.target.value)} 
-              style={{ width: "100%", border: "none", outline: "none", fontSize: 14 }} 
+            <input
+              placeholder="Pesquisar ou começar uma nova conversa"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              style={{ width: "100%", border: "none", outline: "none", fontSize: 14 }}
             />
           </div>
         </div>
         <div style={{ overflowY: "auto", flex: 1 }}>
           {filtered.map(c => (
-            <div 
-              key={c.id} 
-              onClick={() => setSelectedId(c.id)} 
+            <div
+              key={c.id}
+              onClick={() => setSelectedId(c.id)}
               onContextMenu={(e) => {
                 e.preventDefault();
                 const bounds = (e.currentTarget.closest("aside") as HTMLElement)?.getBoundingClientRect();
@@ -741,11 +822,11 @@ export default function Conversations() {
                 const offsetY = e.clientY - (bounds?.top || 0);
                 setContextMenu({ open: true, x: offsetX, y: offsetY, chatId: c.id });
               }}
-              style={{ 
-                display: "flex", 
-                alignItems: "center", 
-                padding: "12px 16px", 
-                cursor: "pointer", 
+              style={{
+                display: "flex",
+                alignItems: "center",
+                padding: "12px 16px",
+                cursor: "pointer",
                 background: selectedId === c.id ? "#f0f2f5" : "transparent",
                 borderBottom: "1px solid #f0f2f5"
               }}
@@ -884,176 +965,295 @@ export default function Conversations() {
                 .map((m, idx) => {
                   const fromMe = m.key?.fromMe;
                   const text = m.message?.conversation || m.message?.extendedTextMessage?.text || "";
+                  const caption = m.message?.imageMessage?.caption || m.message?.videoMessage?.caption || "";
                   const imageUrl = m.message?.imageMessage?.url;
                   const audioUrl = m.message?.audioMessage?.url || (m.message?.documentMessage?.mimetype?.startsWith("audio") ? m.message?.documentMessage?.url : null);
                   const videoUrl = m.message?.videoMessage?.url;
                   const docUrl = m.message?.documentMessage?.url;
                   const docName = (m.message as any)?.documentMessage?.fileName || (docUrl ? docUrl.split("/").pop() : "");
-                  if (!text && !imageUrl && !audioUrl && !videoUrl && !docUrl) return null;
+
+                  const hasMedia = imageUrl || audioUrl || videoUrl || docUrl;
+                  const hasText = text || caption;
+
+                  if (!hasText && !hasMedia) return null;
+
+                  const timestamp = new Date((m.messageTimestamp || Date.now() / 1000) * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
                   return (
-                    <div key={idx} style={{ display: "flex", justifyContent: fromMe ? "flex-end" : "flex-start", marginBottom: 10 }}>
-                      <div style={{ 
-                        background: fromMe ? "#d9fdd3" : "#fff", 
-                        padding: "6px 7px 8px 9px", 
-                        borderRadius: 8, 
-                        maxWidth: "65%", 
+                    <div key={idx} style={{ display: "flex", justifyContent: fromMe ? "flex-end" : "flex-start", marginBottom: 4 }}>
+                      <div style={{
+                        background: fromMe ? "#d9fdd3" : "#ffffff",
+                        borderRadius: 7.5,
+                        maxWidth: "65%",
                         boxShadow: "0 1px 0.5px rgba(11,20,26,.13)",
-                        fontSize: 14.2,
-                        lineHeight: "19px",
-                        color: "#111b21",
-                        position: "relative"
+                        position: "relative",
+                        overflow: "hidden"
                       }}>
-                        {text && <div>{text}</div>}
-                        {imageUrl && <img src={imageUrl} alt="" style={{ maxWidth: "100%", borderRadius: 8, marginTop: 6 }} />}
-                        {audioUrl && <AudioMiniPlayer url={audioUrl} fromMe={!!fromMe} />}
-                        {videoUrl && <video controls src={videoUrl} style={{ width: "100%", marginTop: 6, borderRadius: 8 }} />}
-                        {docUrl && (
-                          <a href={docUrl} target="_blank" rel="noreferrer" style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 6, textDecoration: "none", color: "#111b21" }}>
-                            <span style={{ fontSize: 18 }}>📄</span>
-                            <span style={{ fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{docName || "Documento"}</span>
-                          </a>
+                        {/* Image Message */}
+                        {imageUrl && (
+                          <div style={{ position: "relative" }}>
+                            <img
+                              src={imageUrl}
+                              alt=""
+                              style={{
+                                width: "100%",
+                                maxWidth: 330,
+                                display: "block",
+                                borderRadius: caption || text ? "7.5px 7.5px 0 0" : "7.5px"
+                              }}
+                            />
+                          </div>
                         )}
-                        <div style={{ fontSize: 11, color: "#667781", textAlign: "right", marginTop: 4, float: "right", marginLeft: 10 }}>
-                          {new Date((m.messageTimestamp || Date.now() / 1000) * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+
+                        {/* Video Message */}
+                        {videoUrl && (
+                          <div style={{ position: "relative", maxWidth: 330 }}>
+                            <video
+                              controls
+                              src={videoUrl}
+                              style={{
+                                width: "100%",
+                                display: "block",
+                                borderRadius: caption || text ? "7.5px 7.5px 0 0" : "7.5px",
+                                background: "#000"
+                              }}
+                            />
+                          </div>
+                        )}
+
+                        {/* Audio Message */}
+                        {audioUrl && (
+                          <div style={{ padding: "6px 7px 8px 9px" }}>
+                            <AudioMiniPlayer url={audioUrl} fromMe={!!fromMe} />
+                          </div>
+                        )}
+
+                        {/* Document Message */}
+                        {docUrl && !audioUrl && (
+                          <div style={{ padding: "6px 7px 8px 9px" }}>
+                            <a
+                              href={docUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: 12,
+                                textDecoration: "none",
+                                color: "#111b21",
+                                padding: "8px 10px",
+                                background: fromMe ? "rgba(0, 0, 0, 0.05)" : "#f0f2f5",
+                                borderRadius: 7.5
+                              }}
+                            >
+                              <div style={{
+                                width: 42,
+                                height: 42,
+                                borderRadius: "50%",
+                                background: fromMe ? "#00a884" : "#00a884",
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                color: "#fff",
+                                fontSize: 18,
+                                flexShrink: 0
+                              }}>
+                                📄
+                              </div>
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{
+                                  fontSize: 14,
+                                  fontWeight: 400,
+                                  overflow: "hidden",
+                                  textOverflow: "ellipsis",
+                                  whiteSpace: "nowrap",
+                                  color: "#111b21"
+                                }}>
+                                  {docName || "Documento"}
+                                </div>
+                                <div style={{ fontSize: 12, color: "#667781", marginTop: 2 }}>
+                                  Documento
+                                </div>
+                              </div>
+                            </a>
+                          </div>
+                        )}
+
+                        {/* Text/Caption */}
+                        {(text || caption) && !audioUrl && (
+                          <div style={{
+                            padding: (imageUrl || videoUrl) ? "6px 7px 8px 9px" : "6px 7px 8px 9px",
+                            fontSize: 14.2,
+                            lineHeight: "19px",
+                            color: "#111b21",
+                            wordWrap: "break-word",
+                            whiteSpace: "pre-wrap"
+                          }}>
+                            {text || caption}
+                          </div>
+                        )}
+
+                        {/* Timestamp & Status */}
+                        <div style={{
+                          fontSize: 11,
+                          color: "#667781",
+                          textAlign: "right",
+                          padding: (text || caption || audioUrl) ? "0 7px 6px 9px" : "6px 7px 6px 9px",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "flex-end",
+                          gap: 3,
+                          marginTop: (text || caption) && !audioUrl ? -2 : 0
+                        }}>
+                          <span>{timestamp}</span>
+                          {fromMe && (
+                            <svg width="16" height="11" viewBox="0 0 16 11" fill="none">
+                              <path d="M11.071.653a.5.5 0 0 0-.707 0L5.5 5.518 3.707 3.725a.5.5 0 0 0-.707.707l2.147 2.147a.5.5 0 0 0 .707 0l5.217-5.219a.5.5 0 0 0 0-.707z" fill="#667781" />
+                              <path d="M15.071.653a.5.5 0 0 0-.707 0L9.5 5.518 7.707 3.725a.5.5 0 0 0-.707.707l2.147 2.147a.5.5 0 0 0 .707 0l5.217-5.219a.5.5 0 0 0 0-.707z" fill="#667781" />
+                            </svg>
+                          )}
                         </div>
                       </div>
                     </div>
-                  );
-                })}
-            </div>
-
-            {/* Input de Mensagem */}
-            <footer style={{ padding: "10px 16px", background: "#f0f2f5", display: "flex", alignItems: "center", gap: 10, position: "relative", zIndex: 1 }}>
-              <span style={{ fontSize: 24, color: "#54656f", cursor: "pointer" }}>😊</span>
-              <span style={{ fontSize: 24, color: "#54656f", cursor: "pointer" }} onClick={() => setAttachOpen(v => !v)}>＋</span>
-              {recording === "idle" && (
-                <>
-                  <input 
-                    value={input} 
-                    onChange={e => setInput(e.target.value)} 
-                    onKeyDown={e => e.key === "Enter" && sendMessage()}
-                    placeholder="Digite uma mensagem" 
-                    style={{ flex: 1, padding: "9px 12px", borderRadius: 8, border: "none", outline: "none", fontSize: 15 }} 
-                  />
-                  {input ? (
-                    <button onClick={sendMessage} className="btn-primary" style={{ padding: "8px 16px" }}>➤</button>
-                  ) : (
-                    <button onClick={startRecording} style={{ padding: "8px 12px" }}>🎤</button>
-                  )}
-                  {attachOpen && (
-                    <div style={{ position: "absolute", bottom: 56, left: 60, background: "#fff", border: "1px solid #d1d7db", borderRadius: 12, boxShadow: "0 8px 24px rgba(0,0,0,0.12)", padding: 8, display: "grid", gap: 6, zIndex: 9999, minWidth: 260 }}>
-                      <button onClick={() => fileImgVidRef.current?.click()} style={{ textAlign: "left", padding: "8px 10px", borderRadius: 8, border: "none", background: "transparent", cursor: "pointer" }}>Fotos e Vídeos</button>
-                      <button onClick={() => fileDocRef.current?.click()} style={{ textAlign: "left", padding: "8px 10px", borderRadius: 8, border: "none", background: "transparent", cursor: "pointer" }}>Documento</button>
-                      <button onClick={() => fileStickerRef.current?.click()} style={{ textAlign: "left", padding: "8px 10px", borderRadius: 8, border: "none", background: "transparent", cursor: "pointer" }}>Sticker</button>
-                      <button onClick={sendMyLocation} style={{ textAlign: "left", padding: "8px 10px", borderRadius: 8, border: "none", background: "transparent", cursor: "pointer" }}>Localização</button>
-                      <button onClick={sendActiveContact} style={{ textAlign: "left", padding: "8px 10px", borderRadius: 8, border: "none", background: "transparent", cursor: "pointer" }}>Contato</button>
                     </div>
-                  )}
-                  <input ref={fileImgVidRef} type="file" accept="image/*,video/*" multiple style={{ display: "none" }} onChange={onPickImageVideo} />
-                  <input ref={fileDocRef} type="file" style={{ display: "none" }} onChange={onPickDocument} />
-                  <input ref={fileStickerRef} type="file" accept="image/webp" style={{ display: "none" }} onChange={onPickSticker} />
-                </>
-              )}
-              {recording === "recording" && (
-                <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 12 }}>
-                  <span style={{ color: "#ef4444" }}>●</span>
-                  <span style={{ width: 60, textAlign: "center" }}>
-                    {String(Math.floor(recordTime / 60)).padStart(2, "0")}:
-                    {String(recordTime % 60).padStart(2, "0")}
-                  </span>
-                  <div style={{ display: "flex", gap: 2, alignItems: "flex-end", flex: 1, height: 24 }}>
-                    {levels.map((l, i) => (
-                      <div key={i} style={{ width: 2, height: Math.max(4, Math.min(24, (l / 255) * 24)), background: "#4b5563", borderRadius: 1 }} />
-                    ))}
-                  </div>
-                  <button onClick={pauseRecording} className="btn-secondary" style={{ padding: "6px 10px" }}>Pausar</button>
-                  <button onClick={stopRecording} className="btn-secondary" style={{ padding: "6px 10px" }}>Stop</button>
-                </div>
-              )}
-              {recording === "paused" && (
-                <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 12 }}>
-                  <span style={{ color: "#ef4444" }}>●</span>
-                  <span style={{ width: 60, textAlign: "center" }}>
-                    {String(Math.floor(recordTime / 60)).padStart(2, "0")}:
-                    {String(recordTime % 60).padStart(2, "0")}
-                  </span>
-                  <div style={{ display: "flex", gap: 2, alignItems: "flex-end", flex: 1, height: 24 }}>
-                    {levels.map((l, i) => (
-                      <div key={i} style={{ width: 2, height: Math.max(4, Math.min(24, (l / 255) * 24)), background: "#9ca3af", borderRadius: 1 }} />
-                    ))}
-                  </div>
-                  <button onClick={resumeRecording} className="btn-secondary" style={{ padding: "6px 10px" }}>Retomar</button>
-                  <button onClick={stopRecording} className="btn-secondary" style={{ padding: "6px 10px" }}>Stop</button>
-                </div>
-              )}
-              {recording === "review" && (
-                <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 12 }}>
-                  <audio controls src={recordDataUrl || undefined} style={{ flex: 1 }} />
-                  <button onClick={() => { setRecording("idle"); setRecordDataUrl(null); setLevels([]); setRecordTime(0); }} className="btn-secondary" style={{ padding: "6px 10px" }}>Descartar</button>
-                  <button onClick={() => recordDataUrl && sendAudio(recordDataUrl)} className="btn-primary" style={{ padding: "6px 12px" }}>Enviar</button>
-                </div>
-              )}
-            </footer>
-          </>
-        ) : (
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", color: "#41525d", borderBottom: "6px solid #43c655" }}>
-            <h1 style={{ fontSize: 32, fontWeight: 300, color: "#41525d", marginBottom: 10 }}>SindFlow Web</h1>
-            <div style={{ fontSize: 14 }}>Envie e receba mensagens sem precisar manter seu celular conectado.</div>
+            );
+                })}
           </div>
-        )}
-      </main>
 
-      {/* Sidebar Direita - Detalhes (Colapsável) */}
-      {showDetails && selectedId && (
-        <aside style={{ width: 300, background: "#fff", borderLeft: "1px solid #d1d7db", display: "flex", flexDirection: "column" }}>
-          <header style={{ height: 60, padding: "0 24px", display: "flex", alignItems: "center", background: "#f0f2f5", borderBottom: "1px solid #d1d7db" }}>
-            <span style={{ cursor: "pointer", marginRight: 20, color: "#54656f" }} onClick={() => setShowDetails(false)}>✕</span>
-            <span style={{ fontSize: 16, color: "#111b21" }}>Dados do contato</span>
-          </header>
-          <div style={{ padding: "24px 0", display: "flex", flexDirection: "column", alignItems: "center", borderBottom: "10px solid #f0f2f5" }}>
-             <div style={{ width: 200, height: 200, borderRadius: "50%", background: "#dfe5e7", marginBottom: 15, overflow: "hidden" }}>
-                {profilePics[activeChat?.id || ""] ? (
-                  <img src={profilePics[activeChat?.id || ""]} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                ) : null}
-             </div>
-             <h2 style={{ fontSize: 22, color: "#111b21", fontWeight: 400 }}>{activeChat?.name}</h2>
-             <span style={{ fontSize: 16, color: "#667781" }}>{activeChat?.id?.replace("@s.whatsapp.net", "")}</span>
-             <div style={{ display: "grid", gap: 8, width: "80%", marginTop: 12 }}>
-               <input
-                 value={activeChat?.name || ""}
-                 onChange={e => setChats(prev => prev.map(c => c.id === activeChat?.id ? { ...c, name: e.target.value } : c))}
-                 placeholder="Nome do contato"
-                 style={{ padding: "8px 10px", borderRadius: 8, border: "1px solid #ddd" }}
-               />
-               <button
-                 className="btn-primary"
-                 onClick={async () => {
-                   try {
-                     const { data: { user } } = await supabase.auth.getUser();
-                     const name = (chats.find(c => c.id === activeChat?.id)?.name || "").trim();
-                     if (!user || !activeChat?.id) return;
-                     await supabase.from("contacts").upsert({
-                       user_id: user.id,
-                       wa_number: activeChat.id,
-                       name
-                     }, { onConflict: "user_id, wa_number" });
-                   } catch (err) {
-                     console.error("Falha ao salvar contato:", err);
-                   }
-                 }}
-               >
-                 Salvar contato
-               </button>
-             </div>
-          </div>
-          <div style={{ padding: 16 }}>
-            <div style={{ fontSize: 14, color: "#667781", marginBottom: 8 }}>Etiquetas</div>
-            <div style={{ display: "flex", gap: 8 }}>
-               <span style={{ background: "#e9edef", padding: "4px 8px", borderRadius: 4, fontSize: 12, color: "#111b21" }}>Novo Cliente</span>
+        {/* Input de Mensagem */}
+        <footer style={{ padding: "10px 16px", background: "#f0f2f5", display: "flex", alignItems: "center", gap: 10, position: "relative", zIndex: 1 }}>
+          <span style={{ fontSize: 24, color: "#54656f", cursor: "pointer" }}>😊</span>
+          <span style={{ fontSize: 24, color: "#54656f", cursor: "pointer" }} onClick={() => setAttachOpen(v => !v)}>＋</span>
+          {recording === "idle" && (
+            <>
+              <input
+                value={input}
+                onChange={e => setInput(e.target.value)}
+                onKeyDown={e => e.key === "Enter" && sendMessage()}
+                placeholder="Digite uma mensagem"
+                style={{ flex: 1, padding: "9px 12px", borderRadius: 8, border: "none", outline: "none", fontSize: 15 }}
+              />
+              {input ? (
+                <button onClick={sendMessage} className="btn-primary" style={{ padding: "8px 16px" }}>➤</button>
+              ) : (
+                <button onClick={startRecording} style={{ padding: "8px 12px" }}>🎤</button>
+              )}
+              {attachOpen && (
+                <div style={{ position: "absolute", bottom: 56, left: 60, background: "#fff", border: "1px solid #d1d7db", borderRadius: 12, boxShadow: "0 8px 24px rgba(0,0,0,0.12)", padding: 8, display: "grid", gap: 6, zIndex: 9999, minWidth: 260 }}>
+                  <button onClick={() => fileImgVidRef.current?.click()} style={{ textAlign: "left", padding: "8px 10px", borderRadius: 8, border: "none", background: "transparent", cursor: "pointer" }}>Fotos e Vídeos</button>
+                  <button onClick={() => fileDocRef.current?.click()} style={{ textAlign: "left", padding: "8px 10px", borderRadius: 8, border: "none", background: "transparent", cursor: "pointer" }}>Documento</button>
+                  <button onClick={() => fileStickerRef.current?.click()} style={{ textAlign: "left", padding: "8px 10px", borderRadius: 8, border: "none", background: "transparent", cursor: "pointer" }}>Sticker</button>
+                  <button onClick={sendMyLocation} style={{ textAlign: "left", padding: "8px 10px", borderRadius: 8, border: "none", background: "transparent", cursor: "pointer" }}>Localização</button>
+                  <button onClick={sendActiveContact} style={{ textAlign: "left", padding: "8px 10px", borderRadius: 8, border: "none", background: "transparent", cursor: "pointer" }}>Contato</button>
+                </div>
+              )}
+              <input ref={fileImgVidRef} type="file" accept="image/*,video/*" multiple style={{ display: "none" }} onChange={onPickImageVideo} />
+              <input ref={fileDocRef} type="file" style={{ display: "none" }} onChange={onPickDocument} />
+              <input ref={fileStickerRef} type="file" accept="image/webp" style={{ display: "none" }} onChange={onPickSticker} />
+            </>
+          )}
+          {recording === "recording" && (
+            <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 12 }}>
+              <span style={{ color: "#ef4444" }}>●</span>
+              <span style={{ width: 60, textAlign: "center" }}>
+                {String(Math.floor(recordTime / 60)).padStart(2, "0")}:
+                {String(recordTime % 60).padStart(2, "0")}
+              </span>
+              <div style={{ display: "flex", gap: 2, alignItems: "flex-end", flex: 1, height: 24 }}>
+                {levels.map((l, i) => (
+                  <div key={i} style={{ width: 2, height: Math.max(4, Math.min(24, (l / 255) * 24)), background: "#4b5563", borderRadius: 1 }} />
+                ))}
+              </div>
+              <button onClick={pauseRecording} className="btn-secondary" style={{ padding: "6px 10px" }}>Pausar</button>
+              <button onClick={stopRecording} className="btn-secondary" style={{ padding: "6px 10px" }}>Stop</button>
             </div>
+          )}
+          {recording === "paused" && (
+            <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 12 }}>
+              <span style={{ color: "#ef4444" }}>●</span>
+              <span style={{ width: 60, textAlign: "center" }}>
+                {String(Math.floor(recordTime / 60)).padStart(2, "0")}:
+                {String(recordTime % 60).padStart(2, "0")}
+              </span>
+              <div style={{ display: "flex", gap: 2, alignItems: "flex-end", flex: 1, height: 24 }}>
+                {levels.map((l, i) => (
+                  <div key={i} style={{ width: 2, height: Math.max(4, Math.min(24, (l / 255) * 24)), background: "#9ca3af", borderRadius: 1 }} />
+                ))}
+              </div>
+              <button onClick={resumeRecording} className="btn-secondary" style={{ padding: "6px 10px" }}>Retomar</button>
+              <button onClick={stopRecording} className="btn-secondary" style={{ padding: "6px 10px" }}>Stop</button>
+            </div>
+          )}
+          {recording === "review" && (
+            <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 12 }}>
+              <audio controls src={recordDataUrl || undefined} style={{ flex: 1 }} />
+              <button onClick={() => { setRecording("idle"); setRecordDataUrl(null); setLevels([]); setRecordTime(0); }} className="btn-secondary" style={{ padding: "6px 10px" }}>Descartar</button>
+              <button onClick={() => recordDataUrl && sendAudio(recordDataUrl)} className="btn-primary" style={{ padding: "6px 12px" }}>Enviar</button>
+            </div>
+          )}
+        </footer>
+      </>
+      ) : (
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", color: "#41525d", borderBottom: "6px solid #43c655" }}>
+        <h1 style={{ fontSize: 32, fontWeight: 300, color: "#41525d", marginBottom: 10 }}>SindFlow Web</h1>
+        <div style={{ fontSize: 14 }}>Envie e receba mensagens sem precisar manter seu celular conectado.</div>
+      </div>
+        )}
+    </main>
+
+      {/* Sidebar Direita - Detalhes (Colapsável) */ }
+  {
+    showDetails && selectedId && (
+      <aside style={{ width: 300, background: "#fff", borderLeft: "1px solid #d1d7db", display: "flex", flexDirection: "column" }}>
+        <header style={{ height: 60, padding: "0 24px", display: "flex", alignItems: "center", background: "#f0f2f5", borderBottom: "1px solid #d1d7db" }}>
+          <span style={{ cursor: "pointer", marginRight: 20, color: "#54656f" }} onClick={() => setShowDetails(false)}>✕</span>
+          <span style={{ fontSize: 16, color: "#111b21" }}>Dados do contato</span>
+        </header>
+        <div style={{ padding: "24px 0", display: "flex", flexDirection: "column", alignItems: "center", borderBottom: "10px solid #f0f2f5" }}>
+          <div style={{ width: 200, height: 200, borderRadius: "50%", background: "#dfe5e7", marginBottom: 15, overflow: "hidden" }}>
+            {profilePics[activeChat?.id || ""] ? (
+              <img src={profilePics[activeChat?.id || ""]} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+            ) : null}
           </div>
-        </aside>
-      )}
-    </div>
+          <h2 style={{ fontSize: 22, color: "#111b21", fontWeight: 400 }}>{activeChat?.name}</h2>
+          <span style={{ fontSize: 16, color: "#667781" }}>{activeChat?.id?.replace("@s.whatsapp.net", "")}</span>
+          <div style={{ display: "grid", gap: 8, width: "80%", marginTop: 12 }}>
+            <input
+              value={activeChat?.name || ""}
+              onChange={e => setChats(prev => prev.map(c => c.id === activeChat?.id ? { ...c, name: e.target.value } : c))}
+              placeholder="Nome do contato"
+              style={{ padding: "8px 10px", borderRadius: 8, border: "1px solid #ddd" }}
+            />
+            <button
+              className="btn-primary"
+              onClick={async () => {
+                try {
+                  const { data: { user } } = await supabase.auth.getUser();
+                  const name = (chats.find(c => c.id === activeChat?.id)?.name || "").trim();
+                  if (!user || !activeChat?.id) return;
+                  await supabase.from("contacts").upsert({
+                    user_id: user.id,
+                    wa_number: activeChat.id,
+                    name
+                  }, { onConflict: "user_id, wa_number" });
+                } catch (err) {
+                  console.error("Falha ao salvar contato:", err);
+                }
+              }}
+            >
+              Salvar contato
+            </button>
+          </div>
+        </div>
+        <div style={{ padding: 16 }}>
+          <div style={{ fontSize: 14, color: "#667781", marginBottom: 8 }}>Etiquetas</div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <span style={{ background: "#e9edef", padding: "4px 8px", borderRadius: 4, fontSize: 12, color: "#111b21" }}>Novo Cliente</span>
+          </div>
+        </div>
+      </aside>
+    )
+  }
+    </div >
   );
 }
