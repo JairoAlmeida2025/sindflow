@@ -292,12 +292,17 @@ export default function Conexao() {
 
       // 2. Chamar WEBHOOK_GERADOR
       console.log("Calling WEBHOOK_GERADOR for", finalName);
+
+      // Gerar webhook URL dinâmico para receber mensagens
+      const webhookUrl = `https://editor-n8n.automacoesai.com/webhook/${finalName}`;
+
       const res = await fetch(WEBHOOK_GERADOR, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           connectionName: finalName,
-          userId: userId
+          userId: userId,
+          webhookUrl: webhookUrl
         })
       });
 
@@ -458,12 +463,16 @@ export default function Conexao() {
         }).eq("id", existing.id);
       }
 
+      // Gerar webhook URL dinâmico para receber mensagens
+      const webhookUrl = `https://editor-n8n.automacoesai.com/webhook/${activeSessionId}`;
+
       const res = await fetch(WEBHOOK_RECONECTAR, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           connectionName: activeSessionId,
-          userId: userId
+          userId: userId,
+          webhookUrl: webhookUrl
         })
       });
 
